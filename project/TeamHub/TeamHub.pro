@@ -1,4 +1,4 @@
-QT += widgets core
+QT += widgets core testlib
 
 CONFIG += c++17
 

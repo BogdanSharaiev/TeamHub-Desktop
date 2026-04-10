@@ -82,3 +82,6 @@ CMakeLists.txt.user*
 .uic/
 /build*/
 /.qtcreator/
+tests/**/release/
+tests/**/debug/
+tests/**/.qmake.stash
