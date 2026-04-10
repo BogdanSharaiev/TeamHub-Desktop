@@ -6,6 +6,9 @@ MainWindow::MainWindow(QWidget *parent)
     , ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
+    editor = new CodeEditor(this);
+    setCentralWidget(editor);
+    resize(1200, 800);
 }
 
 MainWindow::~MainWindow()
