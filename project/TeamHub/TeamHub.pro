@@ -1,4 +1,4 @@
-QT += widgets core testlib
+QT += widgets core
 
 CONFIG += c++17
 
@@ -19,9 +19,6 @@ SOURCES += \
 HEADERS += \
     src/editor/codeeditor.h \
     src/mainwindow.h
-
-FORMS += \
-    src/mainwindow.ui
 
 qnx: target.path = /tmp/$${TARGET}/bin
 else: unix:!android: target.path = /opt/$${TARGET}/bin

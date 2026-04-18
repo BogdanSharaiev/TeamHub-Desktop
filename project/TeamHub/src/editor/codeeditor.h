@@ -32,10 +32,6 @@ public:
     int  currentColumn() const;
 
 public slots:
-    void undo();
-    void redo();
-    void zoomIn();
-    void zoomOut();
     void resetZoom();
 
     void applyDarkTheme();
@@ -66,12 +62,12 @@ private:
 
     static constexpr int ErrorIndicator = 8;
 
-    QString           m_filePath;
-    QsciLexerPython*  m_lexer;
-    Theme             m_theme;
-    int               m_zoomLevel;
-    QProcess*         m_lintProcess;
-    QTimer*           m_lintTimer;
+    QString           filePath;
+    QsciLexerPython*  lexer;
+    Theme             theme;
+    int               zoomLevel;
+    QProcess*         lintProcess;
+    QTimer*           lintTimer;
 };
 
 #endif // CODEEDITOR_H

@@ -1,14 +1,19 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
+#include <QAction>
+#include <QDockWidget>
+#include <QLabel>
+#include <QListWidget>
 #include <QMainWindow>
-#include "editor/codeeditor.h"
+#include <QPlainTextEdit>
+#include <QSplitter>
+#include <QStackedWidget>
+#include <QTabWidget>
+#include <QToolButton>
+#include <QTreeWidget>
 
-QT_BEGIN_NAMESPACE
-namespace Ui {
-class MainWindow;
-}
-QT_END_NAMESPACE
+#include "editor/codeeditor.h"
 
 class MainWindow : public QMainWindow
 {
@@ -18,8 +23,79 @@ public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow() override;
 
+protected:
+    void closeEvent(QCloseEvent *event) override;
+
 private:
-    Ui::MainWindow *ui;
-    CodeEditor* editor;
+    //Activity Bar
+    QWidget     *activityBar;
+    QToolButton *btnFiles;
+    QToolButton *btnTasks;
+    QToolButton *btnTeam;
+    QToolButton *btnVoip;
+
+    //Left Sidebar
+    QWidget        *leftPanel;
+    QLabel         *leftTitle;
+    QStackedWidget *leftStack;
+    QTreeWidget    *fileTree;
+    QListWidget    *taskList;
+    QListWidget    *teamList;
+
+    QSplitter  *centralSplitter;
+
+    //Editor Area
+    QTabWidget *editorTabs;
+    CodeEditor *editor;
+
+    //Bottom Dock
+    QDockWidget    *bottomDock;
+    QTabWidget     *bottomTabs;
+    QPlainTextEdit *outputPane;
+    QPlainTextEdit *terminalPane;
+    QWidget        *gitPane;
+
+    QDockWidget *voipDock;
+
+    //Status Bar
+    QLabel *statusFile;
+    QLabel *statusPosition;
+    QLabel *statusEncoding;
+    QLabel *statusLanguage;
+
+    //State
+    int     activeSidePanel;
+    QString currentFilePath;
+
+    //Setup UI
+    void setupMenuBar();
+    void setupMainToolBar();
+    void setupCentralWidget();
+    void setupActivityBar();
+    void setupLeftPanel();
+    void setupEditorArea();
+    void setupBottomDock();
+    void setupVoipDock();
+    void setupStatusBar();
+    void applyTheme();
+
+    void setSidePanelPage(int index);
+    void updateWindowTitle();
+
+private slots:
+    void onActivityButton(int page);
+    void onCursorPositionUpdated(int line, int col);
+    void onModificationChanged(bool modified);
+    void onTabCloseRequested(int tabIndex);
+
+    void newFile();
+    void openFile();
+    bool saveFile();
+    bool saveFileAs();
+
+    void toggleSidePanel();
+    void toggleBottomDock();
+    void toggleVoipDock();
 };
+
 #endif // MAINWINDOW_H
