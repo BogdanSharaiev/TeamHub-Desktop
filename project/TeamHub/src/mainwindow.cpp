@@ -249,23 +249,9 @@ void MainWindow::setupLeftPanel()
 
     leftStack = new QStackedWidget;
 
-    fileTree = new QTreeWidget;
-    fileTree->setObjectName("fileTree");
-    fileTree->setHeaderHidden(true);
-    fileTree->setRootIsDecorated(true);
-    {
-        auto *proj = new QTreeWidgetItem(fileTree, {"TeamHub"});
-        proj->setExpanded(true);
-
-        auto *src = new QTreeWidgetItem(proj, {"src"});
-        src->setExpanded(true);
-        new QTreeWidgetItem(src, {"main.cpp"});
-        new QTreeWidgetItem(src, {"mainwindow.cpp"});
-        new QTreeWidgetItem(src, {"mainwindow.h"});
-        new QTreeWidgetItem(proj, {"TeamHub.pro"});
-        new QTreeWidgetItem(proj, {"README.md"});
-    }
-    leftStack->addWidget(fileTree);
+    fileBrowser = new FileBrowser(this);
+    fileBrowser->setRootPath("C:/TeamHub-Desktop/project/TeamHub");
+    leftStack->addWidget(fileBrowser);
 
     taskList = new QListWidget;
     taskList->setObjectName("taskList");
@@ -278,6 +264,37 @@ void MainWindow::setupLeftPanel()
     leftStack->addWidget(teamList);
 
     vbox->addWidget(leftStack, 1);
+
+    connect(fileBrowser, &FileBrowser::fileDoubleClicked,
+            this, &MainWindow::openFileFromBrowser);
+}
+
+void MainWindow::openFileFromBrowser(const QString& path)
+{
+    for (int i = 0; i < editorTabs->count(); i++) {
+        CodeEditor* existingEditor = qobject_cast<CodeEditor*>(editorTabs->widget(i));
+        if (existingEditor && existingEditor->getFilePath() == path) {
+            editorTabs->setCurrentIndex(i);
+            return;
+        }
+    }
+
+    CodeEditor* newEditor = new CodeEditor(editorTabs);
+    newEditor->loadFile(path);
+
+    const QString name = QFileInfo(path).fileName();
+    int index = editorTabs->addTab(newEditor, name);
+    editorTabs->setCurrentIndex(index);
+
+    connect(newEditor, &CodeEditor::cursorPositionUpdated,
+            this, &MainWindow::onCursorPositionUpdated);
+    connect(newEditor, &QsciScintilla::modificationChanged,
+            this, &MainWindow::onModificationChanged);
+
+    currentFilePath = path;
+    statusFile->setText(name);
+    updateWindowTitle();
+    outputPane->appendPlainText("[TeamHub] Opened: " + path);
 }
 
 void MainWindow::setupEditorArea()
@@ -498,6 +515,35 @@ QListWidget#teamList::item:hover    { background: #2a2d2e; }
 QListWidget#taskList::item:selected,
 QListWidget#teamList::item:selected { background: #094771; }
 
+QTreeView#fileBrowserTree {
+    background: #252526;
+    color: #cccccc;
+    border: none;
+    outline: 0;
+}
+QTreeView#fileBrowserTree::item {
+    height: 22px;
+    padding-left: 4px;
+}
+QTreeView#fileBrowserTree::item:hover {
+    background: #2a2d2e;
+}
+QTreeView#fileBrowserTree::item:selected {
+    background: #094771;
+    color: #ffffff;
+}
+QTreeView#fileBrowserTree::branch {
+    background: #252526;
+}
+QLineEdit#fileSearch {
+    background: #3c3c3c;
+    color: #cccccc;
+    border: none;
+    border-bottom: 1px solid #454545;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
 /* ── Splitter ───────────────────────────────────────────────── */
 QSplitter#centralSplitter::handle {
     background: #3c3c3c;
@@ -631,14 +677,21 @@ void MainWindow::onTabCloseRequested(int tabIndex)
 {
     if (editorTabs->count() <= 1) return;
 
-    if (editor->isModified()) {
+    CodeEditor* tabEditor = qobject_cast<CodeEditor*>(editorTabs->widget(tabIndex));
+    if (!tabEditor) return;
+
+    if (tabEditor->isModified()) {
         const auto btn = QMessageBox::question(
             this, "Unsaved Changes",
             "Save changes before closing this tab?",
             QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
 
-        if (btn == QMessageBox::Save)        { if (!saveFile()) return; }
-        else if (btn == QMessageBox::Cancel) return;
+        if (btn == QMessageBox::Save) {
+            editor = tabEditor;
+            if (!saveFile()) return;
+        } else if (btn == QMessageBox::Cancel) {
+            return;
+        }
     }
 
     editorTabs->removeTab(tabIndex);

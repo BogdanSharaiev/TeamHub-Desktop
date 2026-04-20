@@ -14,6 +14,7 @@
 #include <QTreeWidget>
 
 #include "editor/codeeditor.h"
+#include "filebrowser/filebrowser.h"
 
 class MainWindow : public QMainWindow
 {
@@ -38,7 +39,7 @@ private:
     QWidget        *leftPanel;
     QLabel         *leftTitle;
     QStackedWidget *leftStack;
-    QTreeWidget    *fileTree;
+    FileBrowser *fileBrowser;
     QListWidget    *taskList;
     QListWidget    *teamList;
 
@@ -87,6 +88,7 @@ private slots:
     void onCursorPositionUpdated(int line, int col);
     void onModificationChanged(bool modified);
     void onTabCloseRequested(int tabIndex);
+    void openFileFromBrowser(const QString& path);
 
     void newFile();
     void openFile();

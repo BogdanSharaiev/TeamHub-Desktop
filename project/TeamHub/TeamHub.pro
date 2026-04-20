@@ -13,11 +13,13 @@ win32 {
 
 SOURCES += \
     src/editor/codeeditor.cpp \
+    src/filebrowser/filebrowser.cpp \
     src/main.cpp \
     src/mainwindow.cpp
 
 HEADERS += \
     src/editor/codeeditor.h \
+    src/filebrowser/filebrowser.h \
     src/mainwindow.h
 
 qnx: target.path = /tmp/$${TARGET}/bin
