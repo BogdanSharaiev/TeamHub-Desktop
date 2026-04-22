@@ -66,6 +66,7 @@ void MainWindow::setupMenuBar()
 {
     QMenu *fileMenu = menuBar()->addMenu("&File");
     fileMenu->addAction("&New File",     this, &MainWindow::newFile,         QKeySequence::New);
+    fileMenu->addAction("&Open Folder",  this, &MainWindow::openFolder);
     fileMenu->addAction("&Open File...", this, &MainWindow::openFile,        QKeySequence::Open);
     fileMenu->addAction("&Save",         this, [this]{ saveFile(); },        QKeySequence::Save);
     fileMenu->addAction("Save &As...",   this, [this]{ saveFileAs(); },      QKeySequence::SaveAs);
@@ -716,6 +717,14 @@ void MainWindow::newFile()
     updateWindowTitle();
 }
 
+void MainWindow::clearTabs(){
+    while(editorTabs->count() > 0){
+       QWidget *w = editorTabs->widget(0);
+       editorTabs->removeTab(0);
+       delete w;
+    }
+}
+
 void MainWindow::openFile()
 {
     const QString path = QFileDialog::getOpenFileName(
@@ -723,14 +732,33 @@ void MainWindow::openFile()
         "Python Files (*.py);;All Files (*)");
     if (path.isEmpty()) return;
 
-    editor->loadFile(path);
-    currentFilePath = path;
+    CodeEditor* newEditor = new CodeEditor(editorTabs);
+    newEditor->loadFile(path);
 
     const QString name = QFileInfo(path).fileName();
+    int index = editorTabs->addTab(newEditor, name);
+    editorTabs->setCurrentIndex(index);
+
+    currentFilePath = path;
     statusFile->setText(name);
-    editorTabs->setTabText(editorTabs->currentIndex(), name);
     updateWindowTitle();
     outputPane->appendPlainText("[TeamHub] Opened: " + path);
+}
+
+void MainWindow::openFolder()
+{
+    const QString path = QFileDialog::getExistingDirectory(this, "Open Folder");
+    if (path.isEmpty()) return;
+
+    fileBrowser->setRootPath(path);
+    clearTabs();
+
+    editor = new CodeEditor(editorTabs);
+    editorTabs->addTab(editor, "Untitled");
+
+    currentFilePath.clear();
+    setWindowTitle(QFileInfo(path).fileName() + " — TeamHub");
+    outputPane->appendPlainText("[TeamHub] Opened folder: " + path);
 }
 
 bool MainWindow::saveFile()

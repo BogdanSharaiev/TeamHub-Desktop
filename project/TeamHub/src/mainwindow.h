@@ -83,6 +83,8 @@ private:
     void setSidePanelPage(int index);
     void updateWindowTitle();
 
+    void clearTabs();
+
 private slots:
     void onActivityButton(int page);
     void onCursorPositionUpdated(int line, int col);
@@ -92,6 +94,7 @@ private slots:
 
     void newFile();
     void openFile();
+    void openFolder();
     bool saveFile();
     bool saveFileAs();
 
