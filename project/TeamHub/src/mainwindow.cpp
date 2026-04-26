@@ -333,6 +333,7 @@ void MainWindow::setupBottomDock()
     bottomTabs->addTab(outputPane, "Output");
 
     terminal = new Terminal(this);
+    terminal->setWorkingDirectory(fileBrowser->rootPath());
     terminal->setObjectName("terminal");
     bottomTabs->addTab(terminal, "Terminal");
 
@@ -794,6 +795,8 @@ void MainWindow::openFolder()
     currentFilePath.clear();
     setWindowTitle(QFileInfo(path).fileName() + " — TeamHub");
     outputPane->appendPlainText("[TeamHub] Opened folder: " + path);
+
+    terminal->setWorkingDirectory(path);
 }
 
 bool MainWindow::saveFile()

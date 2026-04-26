@@ -12,6 +12,7 @@ class TerminalEdit : public QPlainTextEdit
 public:
     explicit TerminalEdit(QWidget *parent = nullptr);
     ~TerminalEdit() override;
+    void setWorkingDirectory(const QString& path);
 
 protected:
     void keyPressEvent(QKeyEvent *e) override;
@@ -47,6 +48,7 @@ class Terminal : public QWidget
     Q_OBJECT
 public:
     explicit Terminal(QWidget *parent = nullptr);
+    void setWorkingDirectory(const QString& path);
 
 private:
     TerminalEdit *edit;

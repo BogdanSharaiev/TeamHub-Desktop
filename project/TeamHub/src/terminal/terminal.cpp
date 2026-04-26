@@ -51,6 +51,13 @@ void TerminalEdit::startShell()
     process->start("cmd.exe", {"/Q", "/K", "PROMPT $P$G"});
 }
 
+void TerminalEdit::setWorkingDirectory(const QString &path){
+    currentDir = QDir::toNativeSeparators(path);
+    if(process->state() == QProcess::Running){
+        process->write(("cd /d " + currentDir + "\r\n").toLocal8Bit());
+    }
+}
+
 void TerminalEdit::appendOutput(const QString &text)
 {
     QTextCursor c = textCursor();
@@ -296,4 +303,8 @@ Terminal::Terminal(QWidget *parent)
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
     layout->addWidget(edit);
+}
+
+void Terminal::setWorkingDirectory(const QString &path){
+    edit->setWorkingDirectory(path);
 }
