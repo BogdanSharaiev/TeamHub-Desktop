@@ -48,6 +48,10 @@ void FileBrowser::setupFileBrowser()
                     model->setNameFilters({"*" + text + "*"});
                 }
             });
+
+    tree->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(tree, &QTreeView::customContextMenuRequested,
+            this, &FileBrowser::showContextMenu);
 }
 
 void FileBrowser::setupFilter()
@@ -86,4 +90,149 @@ void FileBrowser::onItemDoubleClicked(const QModelIndex& index)
 
     QString path = model->filePath(index);
     emit fileDoubleClicked(path);
+}
+
+void FileBrowser::showContextMenu(const QPoint& pos)
+{
+    QModelIndex index = tree->indexAt(pos);
+
+    QMenu menu(this);
+
+    if (index.isValid()) {
+        menu.addAction("New File",   this, &FileBrowser::newFile);
+        menu.addAction("New Folder", this, &FileBrowser::newFolder);
+        menu.addSeparator();
+        menu.addAction("Cut",    this, &FileBrowser::cutSelected);
+        menu.addAction("Copy",   this, &FileBrowser::copySelected);
+        menu.addAction("Paste",  this, &FileBrowser::pasteToSelected);
+        menu.addSeparator();
+        menu.addAction("Rename", this, &FileBrowser::renameSelected);
+        menu.addAction("Delete", this, &FileBrowser::deleteSelected);
+    } else {
+        menu.addAction("New File",   this, &FileBrowser::newFile);
+        menu.addAction("New Folder", this, &FileBrowser::newFolder);
+        menu.addAction("Paste",      this, &FileBrowser::pasteToSelected);
+    }
+
+    menu.exec(tree->viewport()->mapToGlobal(pos));
+}
+
+void FileBrowser::deleteSelected()
+{
+    QModelIndex index = tree->currentIndex();
+    if (!index.isValid()) return;
+
+    QString path = model->filePath(index);
+    QFileInfo info(path);
+
+    auto btn = QMessageBox::question(this, "Delete",
+                                     "Delete " + info.fileName() + "?",
+                                     QMessageBox::Yes | QMessageBox::No);
+
+    if (btn != QMessageBox::Yes) return;
+
+    if (info.isDir())
+        QDir(path).removeRecursively();
+    else
+        QFile::remove(path);
+}
+
+void FileBrowser::copySelected()
+{
+    QModelIndex index = tree->currentIndex();
+    if (!index.isValid()) return;
+    clipboardPath = model->filePath(index);
+    isCut = false;
+}
+
+void FileBrowser::cutSelected()
+{
+    QModelIndex index = tree->currentIndex();
+    if (!index.isValid()) return;
+    clipboardPath = model->filePath(index);
+    isCut = true;
+}
+
+void FileBrowser::pasteToSelected()
+{
+    if (clipboardPath.isEmpty()) return;
+
+    QModelIndex index = tree->currentIndex();
+    QString destDir;
+
+    if (index.isValid()) {
+        QString selectedPath = model->filePath(index);
+        destDir = model->isDir(index)
+                      ? selectedPath
+                      : QFileInfo(selectedPath).absolutePath();
+    } else {
+        destDir = model->rootPath();
+    }
+
+    QString fileName = QFileInfo(clipboardPath).fileName();
+    QString destPath = destDir + "/" + fileName;
+
+    if (isCut) {
+        QFile::rename(clipboardPath, destPath);
+        clipboardPath.clear();
+        isCut = false;
+    } else {
+        QFile::copy(clipboardPath, destPath);
+    }
+}
+
+void FileBrowser::newFile()
+{
+    QModelIndex index = tree->currentIndex();
+    QString dir = index.isValid() && model->isDir(index)
+                      ? model->filePath(index)
+                      : (index.isValid()
+                             ? QFileInfo(model->filePath(index)).absolutePath()
+                             : model->rootPath());
+
+    bool ok;
+    QString name = QInputDialog::getText(this, "New File",
+                                         "File name:", QLineEdit::Normal,
+                                         "new_file.py", &ok);
+    if (!ok || name.isEmpty()) return;
+
+    QFile file(dir + "/" + name);
+    file.open(QIODevice::WriteOnly);
+    file.close();
+}
+
+void FileBrowser::newFolder()
+{
+    QModelIndex index = tree->currentIndex();
+    QString dir = index.isValid() && model->isDir(index)
+                      ? model->filePath(index)
+                      : (index.isValid()
+                             ? QFileInfo(model->filePath(index)).absolutePath()
+                             : model->rootPath());
+
+    bool ok;
+    QString name = QInputDialog::getText(this, "New Folder",
+                                         "Folder name:", QLineEdit::Normal,
+                                         "new_folder", &ok);
+    if (!ok || name.isEmpty()) return;
+
+    QDir(dir).mkdir(name);
+}
+
+void FileBrowser::renameSelected()
+{
+    QModelIndex index = tree->currentIndex();
+    if (!index.isValid()) return;
+
+    QString oldPath = model->filePath(index);
+    QString oldName = QFileInfo(oldPath).fileName();
+    QString dir     = QFileInfo(oldPath).absolutePath();
+
+    bool ok;
+    QString newName = QInputDialog::getText(this, "Rename",
+                                            "New name:", QLineEdit::Normal,
+                                            oldName, &ok);
+    if (!ok || newName.isEmpty() || newName == oldName) return;
+
+    QFile::rename(oldPath, dir + "/" + newName);
 }

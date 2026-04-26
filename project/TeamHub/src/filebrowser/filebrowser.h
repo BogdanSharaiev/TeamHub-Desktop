@@ -4,6 +4,9 @@
 #include <QTreeView>
 #include <QFileSystemModel>
 #include <QLineEdit>
+#include <QMenu>
+#include <QMessageBox>
+#include <QInputDialog>
 
 class FileBrowser : public QWidget
 {
@@ -19,7 +22,14 @@ signals:
 
 private slots:
     void onItemDoubleClicked(const QModelIndex& index);
-
+    void showContextMenu(const QPoint& pos);
+    void deleteSelected();
+    void copySelected();
+    void cutSelected();
+    void pasteToSelected();
+    void newFile();
+    void newFolder();
+    void renameSelected();
 private:
     void setupFileBrowser();
     void setupFilter();
@@ -27,6 +37,9 @@ private:
     QTreeView*         tree;
     QFileSystemModel*  model;
     QLineEdit*         searchBox;
+
+    QString clipboardPath;
+    bool    isCut = false;
 };
 
 #endif // FILEBROWSER_H
