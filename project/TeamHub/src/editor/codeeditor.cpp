@@ -117,7 +117,12 @@ void CodeEditor::keyPressEvent(QKeyEvent* event)
     const int key = event->key();
 
     if (mod == Qt::ControlModifier) {
-        if (key == Qt::Key_S)                            { emit fileSaved(); return; }
+        if (key == Qt::Key_S){
+            if (!filePath.isEmpty()) {
+                saveFile(filePath);
+            }
+            return;
+        }
         if (key == Qt::Key_Plus || key == Qt::Key_Equal) { zoomIn();         return; }
         if (key == Qt::Key_Minus)                        { zoomOut();        return; }
         if (key == Qt::Key_0)                            { resetZoom();      return; }
@@ -338,9 +343,9 @@ void CodeEditor::saveFile(const QString& filepath)
 void CodeEditor::setFilePath(const QString& filepath) { filePath = filepath; }
 QString CodeEditor::getFilePath() const               { return filePath; }
 
-void CodeEditor::setTheme(Theme theme)
+void CodeEditor::setTheme(Theme t)
 {
-    theme = theme;
+    theme = t;
     if (theme == Theme::Dark) applyDarkTheme();
     else                      applyLightTheme();
     setupFonts();

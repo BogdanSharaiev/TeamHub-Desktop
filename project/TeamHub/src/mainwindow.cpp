@@ -761,15 +761,23 @@ void MainWindow::openFolder()
 
 bool MainWindow::saveFile()
 {
-    if (currentFilePath.isEmpty())
+    CodeEditor* activeEditor = qobject_cast<CodeEditor*>(
+        editorTabs->currentWidget());
+    if (!activeEditor) return false;
+
+    QString path = activeEditor->getFilePath();
+
+    if (path.isEmpty())
         return saveFileAs();
 
-    editor->saveFile(currentFilePath);
-    const QString name = QFileInfo(currentFilePath).fileName();
+    activeEditor->saveFile(path);
+
+    const QString name = QFileInfo(path).fileName();
+    currentFilePath = path;
     statusFile->setText(name);
     editorTabs->setTabText(editorTabs->currentIndex(), name);
     updateWindowTitle();
-    outputPane->appendPlainText("[TeamHub] Saved: " + currentFilePath);
+    outputPane->appendPlainText("[TeamHub] Saved: " + path);
     return true;
 }
 
