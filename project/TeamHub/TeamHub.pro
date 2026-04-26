@@ -15,12 +15,14 @@ SOURCES += \
     src/editor/codeeditor.cpp \
     src/filebrowser/filebrowser.cpp \
     src/main.cpp \
-    src/mainwindow.cpp
+    src/mainwindow.cpp \
+    src/terminal/terminal.cpp
 
 HEADERS += \
     src/editor/codeeditor.h \
     src/filebrowser/filebrowser.h \
-    src/mainwindow.h
+    src/mainwindow.h \
+    src/terminal/terminal.h
 
 qnx: target.path = /tmp/$${TARGET}/bin
 else: unix:!android: target.path = /opt/$${TARGET}/bin

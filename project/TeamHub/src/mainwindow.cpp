@@ -333,11 +333,9 @@ void MainWindow::setupBottomDock()
     outputPane->setPlaceholderText("Build and run output will appear here...");
     bottomTabs->addTab(outputPane, "Output");
 
-    terminalPane = new QPlainTextEdit;
-    terminalPane->setObjectName("terminalPane");
-    terminalPane->setReadOnly(true);
-    terminalPane->setPlaceholderText("Integrated terminal");
-    bottomTabs->addTab(terminalPane, "Terminal");
+    terminal = new Terminal(this);
+    terminal->setObjectName("terminal");
+    bottomTabs->addTab(terminal, "Terminal");
 
     gitPane = new QWidget;
     gitPane->setObjectName("gitPane");

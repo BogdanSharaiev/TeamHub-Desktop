@@ -15,6 +15,7 @@
 
 #include "editor/codeeditor.h"
 #include "filebrowser/filebrowser.h"
+#include "terminal/terminal.h"
 
 class MainWindow : public QMainWindow
 {
@@ -54,8 +55,8 @@ private:
     QTabWidget     *bottomTabs;
     QPlainTextEdit *outputPane;
     QPlainTextEdit *terminalPane;
-    QWidget        *gitPane;
-
+    Terminal *terminal;
+    QWidget   *gitPane;
     QDockWidget *voipDock;
 
     //Status Bar
