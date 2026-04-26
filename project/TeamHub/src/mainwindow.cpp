@@ -141,10 +141,9 @@ void MainWindow::setupMainToolBar()
     tb->addAction("Save", this, [this]{ saveFile(); });
     tb->addSeparator();
 
-    auto *actRun = tb->addAction("Run");
-    actRun->setToolTip("Run (F5)  —  stub");
+    auto *actRun = tb->addAction("Run", this, &MainWindow::runFile);
+    actRun->setToolTip("Run (F5)");
     actRun->setShortcut(QKeySequence("F5"));
-    actRun->setEnabled(false);
 
     auto *actDebug = tb->addAction("Debug");
     actDebug->setToolTip("Start Debugging (F9)  —  stub");
@@ -694,6 +693,44 @@ void MainWindow::onTabCloseRequested(int tabIndex)
     }
 
     editorTabs->removeTab(tabIndex);
+}
+
+void MainWindow::runFile()
+{
+    CodeEditor* currentEditor = qobject_cast<CodeEditor*>(
+        editorTabs->currentWidget());
+    if (!currentEditor) return;
+
+    QString path = currentEditor->getFilePath();
+    if (path.isEmpty()) {
+        outputPane->appendPlainText("[TeamHub] Save file before running.");
+        return;
+    }
+
+    QString projectDir = fileBrowser->rootPath();
+    QString pythonvenv = fileBrowser->findFile("python.exe");
+    QString pythonpath = !pythonvenv.isEmpty() ? pythonvenv : "python";
+    currentEditor->saveFile(path);
+    outputPane->clear();
+    bottomTabs->setCurrentWidget(outputPane);
+    bottomDock->setVisible(true);
+
+    QProcess* proc = new QProcess(this);
+    proc->setProcessChannelMode(QProcess::MergedChannels);
+
+    connect(proc, &QProcess::readyReadStandardOutput, this, [this, proc]() {
+        outputPane->appendPlainText(
+            QString::fromLocal8Bit(proc->readAllStandardOutput()));
+    });
+
+    connect(proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, [this, proc](int code, QProcess::ExitStatus) {
+                outputPane->appendPlainText(
+                    QString("\n[TeamHub] Exit code: %1").arg(code));
+                proc->deleteLater();
+            });
+
+    proc->start(pythonpath, {path});
 }
 
 void MainWindow::newFile()

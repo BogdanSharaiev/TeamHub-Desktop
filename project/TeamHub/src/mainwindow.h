@@ -35,7 +35,6 @@ private:
     QToolButton *btnTasks;
     QToolButton *btnTeam;
     QToolButton *btnVoip;
-
     //Left Sidebar
     QWidget        *leftPanel;
     QLabel         *leftTitle;
@@ -96,6 +95,7 @@ private slots:
     void newFile();
     void openFile();
     void openFolder();
+    void runFile();
     bool saveFile();
     bool saveFileAs();
 

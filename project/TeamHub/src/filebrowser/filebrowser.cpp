@@ -1,6 +1,7 @@
 #include "filebrowser.h"
 #include <QVBoxLayout>
 #include <QDir>
+#include <QDirIterator>
 
 FileBrowser::FileBrowser(QWidget* parent)
     : QWidget(parent)
@@ -64,6 +65,19 @@ void FileBrowser::setRootPath(const QString& path)
 QString FileBrowser::rootPath() const
 {
     return model->rootPath();
+}
+
+QString FileBrowser::findFile(const QString& filename){
+    QString root = rootPath();
+    QDirIterator it(root,
+        QStringList() << filename,
+        QDir::Files,
+        QDirIterator::Subdirectories);
+
+    if(it.hasNext()){
+        return it.next();
+    }
+    return "";
 }
 
 void FileBrowser::onItemDoubleClicked(const QModelIndex& index)
