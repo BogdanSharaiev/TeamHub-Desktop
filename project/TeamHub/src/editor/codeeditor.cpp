@@ -33,9 +33,9 @@ CodeEditor::CodeEditor(QWidget* parent)
     setupAutoComplete();
     setupLinter();
 
-    connect(this, &QsciScintilla::textChanged,        this, &CodeEditor::fileModified);
-    connect(this, &QsciScintilla::cursorPositionChanged, this, &CodeEditor::onCursorChanged);
-    connect(this, &QsciScintilla::modificationChanged, this, &CodeEditor::onModified);
+    connect(this, SIGNAL(textChanged()),                    this, SIGNAL(fileModified()));
+    connect(this, SIGNAL(cursorPositionChanged(int,int)),   this, SLOT(onCursorChanged(int,int)));
+    connect(this, SIGNAL(modificationChanged(bool)),        this, SLOT(onModified(bool)));
 }
 
 void CodeEditor::setupLexer()
@@ -267,9 +267,7 @@ void CodeEditor::setupLinter()
     lintTimer->setInterval(800);
 
     connect(lintTimer, &QTimer::timeout, this, &CodeEditor::checkSyntax);
-    connect(this, &QsciScintilla::textChanged, this, [this]() {
-        lintTimer->start();
-    });
+    connect(this, SIGNAL(textChanged()), lintTimer, SLOT(start()));
 }
 
 void CodeEditor::checkSyntax()

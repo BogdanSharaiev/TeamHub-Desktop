@@ -282,16 +282,13 @@ void MainWindow::openFileFromBrowser(const QString& path)
 
     CodeEditor* newEditor = new CodeEditor(editorTabs);
     newEditor->loadFile(path);
-
-    const QString name = QFileInfo(path).fileName();
-    int index = editorTabs->addTab(newEditor, name);
-    editorTabs->setCurrentIndex(index);
-
     connect(newEditor, &CodeEditor::cursorPositionUpdated,
             this, &MainWindow::onCursorPositionUpdated);
     connect(newEditor, &CodeEditor::modifyChanged,
             this, &MainWindow::onModificationChanged);
-
+    const QString name = QFileInfo(path).fileName();
+    int index = editorTabs->addTab(newEditor, name);
+    editorTabs->setCurrentIndex(index);
     currentFilePath = path;
     //statusFile->setText(name);
     updateWindowTitle();
@@ -418,18 +415,20 @@ void MainWindow::onTabChanged(int index){
     if(!activeEditor) return;
     editor = activeEditor;
     QString path = activeEditor->getFilePath();
+    currentFilePath = path;
     QString filename;
     if(path.isEmpty()){
         filename = "Untitled";
         statusFile->setText(filename);
-        return;
+    }else{
+        filename = QFileInfo(path).fileName();
     }
-    filename = QFileInfo(path).fileName();
     statusFile->setText(filename);
     statusPosition->setText(
         QString("Ln %1, Col %2")
             .arg(activeEditor->currentLine() + 1)
             .arg(activeEditor->currentColumn() + 1));
+    updateWindowTitle();
 }
 
 void MainWindow::applyTheme()
@@ -791,7 +790,10 @@ void MainWindow::openFile()
 
     CodeEditor* newEditor = new CodeEditor(editorTabs);
     newEditor->loadFile(path);
-
+    connect(newEditor, &CodeEditor::cursorPositionUpdated,
+            this, &MainWindow::onCursorPositionUpdated);
+    connect(newEditor, &CodeEditor::modifyChanged,
+            this, &MainWindow::onModificationChanged);
     const QString name = QFileInfo(path).fileName();
     int index = editorTabs->addTab(newEditor, name);
     editorTabs->setCurrentIndex(index);
