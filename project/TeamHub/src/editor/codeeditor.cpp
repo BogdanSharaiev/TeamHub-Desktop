@@ -34,7 +34,8 @@ CodeEditor::CodeEditor(QWidget* parent)
     setupLinter();
 
     connect(this, &QsciScintilla::textChanged,        this, &CodeEditor::fileModified);
-    connect(this, &QsciScintilla::cursorPositionChanged, this, &CodeEditor::cursorPositionUpdated);
+    connect(this, &QsciScintilla::cursorPositionChanged, this, &CodeEditor::onCursorChanged);
+    connect(this, &QsciScintilla::modificationChanged, this, &CodeEditor::onModified);
 }
 
 void CodeEditor::setupLexer()
@@ -105,6 +106,14 @@ void CodeEditor::setupEditor()
 
     SendScintilla(SCI_SETMULTIPLESELECTION, 1);
     SendScintilla(SCI_SETADDITIONALSELECTIONTYPING, 1);
+}
+
+void CodeEditor::onCursorChanged(int line, int index){
+    emit cursorPositionUpdated(line, index);
+}
+
+void CodeEditor::onModified(bool modified){
+    emit modifyChanged(modified);
 }
 
 void CodeEditor::keyPressEvent(QKeyEvent* event)

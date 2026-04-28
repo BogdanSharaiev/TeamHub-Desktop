@@ -31,10 +31,11 @@ MainWindow::MainWindow(QWidget *parent)
 
     setSidePanelPage(0);
     btnFiles->setChecked(true);
-
+    connect(editorTabs, &QTabWidget::currentChanged,
+            this, &MainWindow::onTabChanged);
     connect(editor, &CodeEditor::cursorPositionUpdated,
             this, &MainWindow::onCursorPositionUpdated);
-    connect(editor, &QsciScintilla::modificationChanged,
+    connect(editor, &CodeEditor::modifyChanged,
             this, &MainWindow::onModificationChanged);
 
     outputPane->appendPlainText("[TeamHub] Ready.");
@@ -288,11 +289,11 @@ void MainWindow::openFileFromBrowser(const QString& path)
 
     connect(newEditor, &CodeEditor::cursorPositionUpdated,
             this, &MainWindow::onCursorPositionUpdated);
-    connect(newEditor, &QsciScintilla::modificationChanged,
+    connect(newEditor, &CodeEditor::modifyChanged,
             this, &MainWindow::onModificationChanged);
 
     currentFilePath = path;
-    statusFile->setText(name);
+    //statusFile->setText(name);
     updateWindowTitle();
     outputPane->appendPlainText("[TeamHub] Opened: " + path);
 }
@@ -409,6 +410,26 @@ void MainWindow::setupStatusBar()
     statusBar()->addPermanentWidget(statusPosition);
     statusBar()->addPermanentWidget(statusEncoding);
     statusBar()->addPermanentWidget(statusLanguage);
+}
+
+void MainWindow::onTabChanged(int index){
+    CodeEditor* activeEditor = qobject_cast<CodeEditor*>(
+        editorTabs->widget(index));
+    if(!activeEditor) return;
+    editor = activeEditor;
+    QString path = activeEditor->getFilePath();
+    QString filename;
+    if(path.isEmpty()){
+        filename = "Untitled";
+        statusFile->setText(filename);
+        return;
+    }
+    filename = QFileInfo(path).fileName();
+    statusFile->setText(filename);
+    statusPosition->setText(
+        QString("Ln %1, Col %2")
+            .arg(activeEditor->currentLine() + 1)
+            .arg(activeEditor->currentColumn() + 1));
 }
 
 void MainWindow::applyTheme()
@@ -652,10 +673,10 @@ void MainWindow::onActivityButton(int page)
     setSidePanelPage(page);
 }
 
-void MainWindow::onCursorPositionUpdated(int line, int col)
+void MainWindow::onCursorPositionUpdated(int line, int index)
 {
     statusPosition->setText(
-        QString("Ln %1, Col %2").arg(line + 1).arg(col + 1));
+        QString("Ln %1, Col %2").arg(line + 1).arg(index + 1));
 }
 
 void MainWindow::onModificationChanged(bool modified)

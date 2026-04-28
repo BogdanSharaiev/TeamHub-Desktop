@@ -87,9 +87,10 @@ private:
 
 private slots:
     void onActivityButton(int page);
-    void onCursorPositionUpdated(int line, int col);
+    void onCursorPositionUpdated(int line, int index);
     void onModificationChanged(bool modified);
     void onTabCloseRequested(int tabIndex);
+    void onTabChanged(int index);
     void openFileFromBrowser(const QString& path);
 
     void newFile();
