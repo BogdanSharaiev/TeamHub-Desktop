@@ -19,6 +19,8 @@ SOURCES += \
     src/terminal/terminal.cpp
 
 HEADERS += \
+    src/crdt/rganode.h \
+    src/crdt/rgaseq.h \
     src/editor/codeeditor.h \
     src/filebrowser/filebrowser.h \
     src/mainwindow.h \
