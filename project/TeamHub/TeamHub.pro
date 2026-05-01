@@ -16,6 +16,7 @@ SOURCES += \
     src/filebrowser/filebrowser.cpp \
     src/main.cpp \
     src/mainwindow.cpp \
+    src/rga/rgaseq.cpp \
     src/terminal/terminal.cpp
 
 HEADERS += \

@@ -7,7 +7,7 @@ struct RGAId{
     int timestamp = 0;
     int siteId = 0;
 
-    bool operator==(const RGAId other) const{
+    bool operator==(const RGAId& other) const{
         return timestamp == other.timestamp && siteId == other.siteId;
     }
 };
@@ -17,6 +17,10 @@ struct RGANode{
     RGAId parent;
     QChar val;
     bool tombstone = false;
+
+    bool operator==(const RGANode& other) const{
+        return id == other.id;
+    }
 };
 
 #endif // RGANODE_H

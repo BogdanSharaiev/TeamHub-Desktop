@@ -10,7 +10,7 @@ public:
     void insert(RGANode& node);
     void remove(RGAId& id);
     QString toText();
-    RGANode* findById(RGAId& id);
+    RGANode* findById(const RGAId& id);
     RGAId idAtPosition(int pos);
     int length();
 
