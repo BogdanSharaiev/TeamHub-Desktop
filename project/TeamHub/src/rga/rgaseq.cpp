@@ -21,7 +21,7 @@ static bool isRootId(const RGAId& id)
     return id.timestamp == 0 && id.siteId == 0;
 }
 
-void RGASequence::insert(RGANode& node)
+void RGASequence::insert(const RGANode& node)
 {
     if (findById(node.id) != nullptr)
         return;
@@ -40,7 +40,6 @@ void RGASequence::insert(RGANode& node)
     if (!parentFound && !isRootId(node.parent)) {
         return;
     }
-
     if (parentFound) {
         while (insertIndex < rgaseq.size()
                && rgaseq[insertIndex].parent == node.parent
@@ -57,7 +56,7 @@ void RGASequence::insert(RGANode& node)
     rgaseq.insert(insertIndex, node);
 }
 
-void RGASequence::remove(RGAId& id)
+void RGASequence::remove(const RGAId& id)
 {
     RGANode* node = findById(id);
 

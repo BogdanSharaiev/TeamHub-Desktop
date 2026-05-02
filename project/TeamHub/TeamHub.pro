@@ -1,4 +1,4 @@
-QT += widgets core
+QT += widgets core websockets
 
 CONFIG += c++17
 
@@ -16,6 +16,7 @@ SOURCES += \
     src/filebrowser/filebrowser.cpp \
     src/main.cpp \
     src/mainwindow.cpp \
+    src/rga/rgamanager.cpp \
     src/rga/rgaseq.cpp \
     src/terminal/terminal.cpp
 
@@ -25,6 +26,7 @@ HEADERS += \
     src/editor/codeeditor.h \
     src/filebrowser/filebrowser.h \
     src/mainwindow.h \
+    src/rga/rgamanager.h \
     src/terminal/terminal.h
 
 qnx: target.path = /tmp/$${TARGET}/bin

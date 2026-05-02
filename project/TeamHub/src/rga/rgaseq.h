@@ -7,8 +7,8 @@
 
 class RGASequence{
 public:
-    void insert(RGANode& node);
-    void remove(RGAId& id);
+    void insert(const RGANode& node);
+    void remove(const RGAId& id);
     QString toText();
     RGANode* findById(const RGAId& id);
     RGAId idAtPosition(int pos);
