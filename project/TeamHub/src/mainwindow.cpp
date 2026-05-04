@@ -40,6 +40,9 @@ MainWindow::MainWindow(QWidget *parent)
 
     outputPane->appendPlainText("[TeamHub] Ready.");
     updateWindowTitle();
+
+    rgamanager = new RGAManager(1 ,this);
+    rgamanager->connectToServer("ws://localhost:8765/room1");
 }
 
 MainWindow::~MainWindow() = default;

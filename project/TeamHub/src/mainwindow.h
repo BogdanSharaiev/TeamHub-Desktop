@@ -16,6 +16,7 @@
 #include "editor/codeeditor.h"
 #include "filebrowser/filebrowser.h"
 #include "terminal/terminal.h"
+#include "rga/rgamanager.h"
 
 class MainWindow : public QMainWindow
 {
@@ -67,6 +68,9 @@ private:
     //State
     int     activeSidePanel;
     QString currentFilePath;
+
+    // RGA Colab
+    RGAManager* rgamanager;
 
     //Setup UI
     void setupMenuBar();
