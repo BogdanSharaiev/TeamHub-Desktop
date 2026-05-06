@@ -114,6 +114,10 @@ void RGAManager::onMessageReceived(const QString& message)
         RGAId id = jsonToId(obj["id"].toObject());
         remoteDelete(id);
     }
+    else if(type == "snapshot"){
+        QString text = obj["text"].toString();
+        buildFromText(text);
+    }
 }
 
 void RGAManager::onError(QAbstractSocket::SocketError error)
@@ -164,4 +168,34 @@ void RGAManager::sendMessage(const QJsonObject& msg)
     if (!isConnected()) return;
     socket->sendTextMessage(
         QJsonDocument(msg).toJson(QJsonDocument::Compact));
+}
+
+void RGAManager::buildFromText(const QString& text)
+{
+    sequence.clear();
+
+    timestamp = 0;
+
+    RGAId parent = RGAId{};
+    for (int i = 0; i < text.size(); ++i) {
+        ++timestamp;
+
+        RGANode node;
+        node.id.timestamp = timestamp;
+        node.id.siteId    = siteId;
+        node.parent       = parent;
+        node.val          = text[i];
+        node.tombstone    = false;
+
+        sequence.insert(node);
+
+        parent = node.id;
+    }
+}
+
+void RGAManager::sendInitText(const QString text){
+    QJsonObject msg;
+    msg["type"] = "snapshot";
+    msg["text"] = text;
+    sendMessage(msg);
 }

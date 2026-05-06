@@ -7,6 +7,7 @@ PORT = 8765
 
 rooms: dict[str, set] = {}
 history: dict[str, list[dict]] = {}
+snapshots: dict[str, str] = {}
 
 
 def get_room_from_path(path):
@@ -57,13 +58,22 @@ def is_operation(payload):
     return False
 
 
+def is_snapshot(payload):
+    return payload.get("type") == "snapshot"
+
+
 async def handle_client(websocket):
     room = get_room_from_path(websocket.request.path)
     rooms.setdefault(room, set()).add(websocket)
     history.setdefault(room, [])
+    snapshots.setdefault(room, "")
 
     print(f"[JOIN] room={room}, clients={len(rooms[room])}")
-
+    if snapshots[room]:
+        await send_json(websocket, {
+            "type": "snapshot",
+            "text": snapshots[room]
+        })
     for operation in history[room]:
         await send_json(websocket, operation)
     try:
@@ -78,6 +88,14 @@ async def handle_client(websocket):
                 continue
 
             if not isinstance(payload, dict) or not is_operation(payload):
+                if is_snapshot(payload):
+                    if not snapshots[room]:
+                        snapshots[room] = payload.get("text", "")
+
+                        await broadcast(room, websocket, payload)
+                        print(f"[SNAPSHOT] room={room} set")
+
+                    continue
                 await send_json(websocket, {
                     "type": "error",
                     "message": "Invalid RGA operation"

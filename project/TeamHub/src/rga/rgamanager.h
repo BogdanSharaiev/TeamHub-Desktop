@@ -17,6 +17,8 @@ public:
     void disconnectFromServer();
     bool isConnected();
     QString getText();
+    void buildFromText(const QString& text);
+    void sendInitText(const QString text);
 
 signals:
     void textChanged(const QString& newText);

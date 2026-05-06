@@ -13,6 +13,7 @@ public:
     RGANode* findById(const RGAId& id);
     RGAId idAtPosition(int pos);
     int length();
+    void clear();
 
 private:
     QList<RGANode> rgaseq;

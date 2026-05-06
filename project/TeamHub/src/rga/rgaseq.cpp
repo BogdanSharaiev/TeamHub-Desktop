@@ -121,3 +121,7 @@ int RGASequence::length()
 
     return count;
 }
+
+void RGASequence::clear(){
+    rgaseq.clear();
+}

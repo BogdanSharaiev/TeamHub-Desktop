@@ -37,11 +37,15 @@ public slots:
     void applyDarkTheme();
     void applyLightTheme();
     void onModified(bool modified);
+    void onCharAdded(int ch);
+
 signals:
     void fileModified();
     void fileSaved();
     void cursorPositionUpdated(int line, int index);
     void modifyChanged(bool modified);
+    void localInsert(int position, QChar ch);
+
 protected:
     void keyPressEvent(QKeyEvent* event) override;
 

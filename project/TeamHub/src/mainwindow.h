@@ -107,6 +107,8 @@ private slots:
     void toggleSidePanel();
     void toggleBottomDock();
     void toggleVoipDock();
+
+    void startCollab(const QString room);
 };
 
 #endif // MAINWINDOW_H

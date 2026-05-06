@@ -36,6 +36,9 @@ CodeEditor::CodeEditor(QWidget* parent)
     connect(this, SIGNAL(textChanged()),                    this, SIGNAL(fileModified()));
     connect(this, SIGNAL(cursorPositionChanged(int,int)),   this, SLOT(onCursorChanged(int,int)));
     connect(this, SIGNAL(modificationChanged(bool)),        this, SLOT(onModified(bool)));
+
+    connect(this, SIGNAL(SCN_CHARADDED(int)),
+            this, SLOT(onCharAdded(int)));
 }
 
 void CodeEditor::setupLexer()
@@ -106,6 +109,8 @@ void CodeEditor::setupEditor()
 
     SendScintilla(SCI_SETMULTIPLESELECTION, 1);
     SendScintilla(SCI_SETADDITIONALSELECTIONTYPING, 1);
+
+
 }
 
 void CodeEditor::onCursorChanged(int line, int index){
@@ -467,3 +472,32 @@ void CodeEditor::resetZoom()
     zoomTo(0);
     zoomLevel = 0;
 }
+
+void CodeEditor::onCharAdded(int ch)
+{
+    int pos = SendScintilla(SCI_GETCURRENTPOS);
+
+    if (ch == 0) return;
+
+    QChar addedChar = QChar(ch);
+
+    if (addedChar.isPrint()) {
+        emit localInsert(pos, addedChar);
+    }
+}
+
+// void CodeEditor::applyRemoteText(const QString& newText)
+// {
+//     applyingRemote = true;
+
+//     blockSignals(true);
+
+//     int line, col;
+//     getCursorPosition(&line, &col);
+//     setText(newText);
+//     setCursorPosition(line, col);
+
+//     blockSignals(false);
+
+//     applyingRemote = false;
+// }

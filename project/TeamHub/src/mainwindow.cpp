@@ -41,8 +41,7 @@ MainWindow::MainWindow(QWidget *parent)
     outputPane->appendPlainText("[TeamHub] Ready.");
     updateWindowTitle();
 
-    rgamanager = new RGAManager(1 ,this);
-    rgamanager->connectToServer("ws://localhost:8765/room1");
+    rgamanager = new RGAManager(time(nullptr) ,this);
 }
 
 MainWindow::~MainWindow() = default;
@@ -157,12 +156,36 @@ void MainWindow::setupMainToolBar()
     tb->addSeparator();
 
     auto *actCollab = tb->addAction("Collab");
-    actCollab->setToolTip("Start collaborative editing session  —  stub");
-    actCollab->setEnabled(false);
+    connect(actCollab, &QAction::triggered, this, [this]() {
+        bool ok;
+        QString room = QInputDialog::getText(
+            this,
+            "Join Collaboration",
+            "Enter room name:",
+            QLineEdit::Normal,
+            "",
+            &ok
+            );
+
+        if (!ok || room.isEmpty())
+            return;
+
+        startCollab(room);
+    });
 
     auto *actCall = tb->addAction("Call");
     actCall->setToolTip("Toggle Voice");
     connect(actCall, &QAction::triggered, this, &MainWindow::toggleVoipDock);
+}
+
+void MainWindow::startCollab(const QString room){
+    QString url = QString("ws://localhost:8765/%1").arg(room);
+    CodeEditor* activeEditor = qobject_cast<CodeEditor*>(
+        editorTabs->currentWidget());
+    rgamanager->disconnectFromServer();
+    rgamanager->connectToServer(url);
+    rgamanager->buildFromText(activeEditor->text());
+    outputPane->appendPlainText("[TeamHub] Connecting to room: " + room);
 }
 
 void MainWindow::setupCentralWidget()
@@ -289,6 +312,8 @@ void MainWindow::openFileFromBrowser(const QString& path)
             this, &MainWindow::onCursorPositionUpdated);
     connect(newEditor, &CodeEditor::modifyChanged,
             this, &MainWindow::onModificationChanged);
+    connect(newEditor, &CodeEditor::localInsert,
+            rgamanager, &RGAManager::localInsert);
     const QString name = QFileInfo(path).fileName();
     int index = editorTabs->addTab(newEditor, name);
     editorTabs->setCurrentIndex(index);
@@ -797,6 +822,8 @@ void MainWindow::openFile()
             this, &MainWindow::onCursorPositionUpdated);
     connect(newEditor, &CodeEditor::modifyChanged,
             this, &MainWindow::onModificationChanged);
+    connect(newEditor, &CodeEditor::localInsert,
+            rgamanager, &RGAManager::localInsert);
     const QString name = QFileInfo(path).fileName();
     int index = editorTabs->addTab(newEditor, name);
     editorTabs->setCurrentIndex(index);
