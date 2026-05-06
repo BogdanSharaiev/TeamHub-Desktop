@@ -1,5 +1,6 @@
 #include "rgamanager.h"
 #include <QJsonArray>
+#include <QFileInfo>
 
 RGAManager::RGAManager(int siteId, QObject* parent)
     : QObject(parent)
@@ -116,7 +117,10 @@ void RGAManager::onMessageReceived(const QString& message)
     }
     else if(type == "snapshot"){
         QString text = obj["text"].toString();
+        QString path = obj["path"].toString();
+        QString filename = QFileInfo(path).fileName();
         buildFromText(text);
+        emit onInitReceived(sequence.toText(), filename);
     }
 }
 
@@ -193,9 +197,20 @@ void RGAManager::buildFromText(const QString& text)
     }
 }
 
-void RGAManager::sendInitText(const QString text){
+void RGAManager::sendInitText(const QString text, const QString path){
     QJsonObject msg;
     msg["type"] = "snapshot";
     msg["text"] = text;
+    msg["path"] = path;
     sendMessage(msg);
+}
+
+void RGAManager::debug()
+{
+    for (const RGANode& node : sequence.rgaseq) {
+        qDebug() << "VAL:" << node.val
+                 << "ID:" << node.id.timestamp << node.id.siteId
+                 << "PARENT:" << node.parent.timestamp << node.parent.siteId
+                 << "TOMBSTONE:" << node.tombstone;
+    }
 }

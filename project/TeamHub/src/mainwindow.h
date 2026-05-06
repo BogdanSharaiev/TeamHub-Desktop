@@ -88,6 +88,8 @@ private:
     void updateWindowTitle();
 
     void clearTabs();
+    CodeEditor* createTab(const QString& name);
+
 
 private slots:
     void onActivityButton(int page);
@@ -109,6 +111,7 @@ private slots:
     void toggleVoipDock();
 
     void startCollab(const QString room);
+    void joinCollab();
 };
 
 #endif // MAINWINDOW_H

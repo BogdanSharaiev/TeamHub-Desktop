@@ -18,13 +18,14 @@ public:
     bool isConnected();
     QString getText();
     void buildFromText(const QString& text);
-    void sendInitText(const QString text);
-
+    void sendInitText(const QString text, const QString path);
+    void debug();
 signals:
     void textChanged(const QString& newText);
     void connected();
     void disconnected();
     void errorOccurred(const QString& error);
+    void onInitReceived(QString text, QString filename);
 
 private slots:
     void onConnected();

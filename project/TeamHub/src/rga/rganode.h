@@ -10,6 +10,9 @@ struct RGAId{
     bool operator==(const RGAId& other) const{
         return timestamp == other.timestamp && siteId == other.siteId;
     }
+    bool operator!=(const RGAId& other) const{
+        return timestamp != other.timestamp && siteId != other.siteId;
+    }
 };
 
 struct RGANode{

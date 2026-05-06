@@ -86,8 +86,7 @@ async def handle_client(websocket):
                     "message": "Invalid JSON"
                 })
                 continue
-
-            if not isinstance(payload, dict) or not is_operation(payload):
+            if not is_operation(payload):
                 if is_snapshot(payload):
                     if not snapshots[room]:
                         snapshots[room] = payload.get("text", "")

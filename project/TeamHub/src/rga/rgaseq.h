@@ -15,7 +15,7 @@ public:
     int length();
     void clear();
 
-private:
+// private:
     QList<RGANode> rgaseq;
 };
 

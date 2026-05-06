@@ -9,6 +9,7 @@
 #include <QColor>
 #include <QKeyEvent>
 #include <QRegularExpression>
+#include <QTextCursor>
 
 static const QList<QPair<QChar,QChar>> kAutoPairs = {
     {'(', ')'},
@@ -486,18 +487,24 @@ void CodeEditor::onCharAdded(int ch)
     }
 }
 
-// void CodeEditor::applyRemoteText(const QString& newText)
-// {
-//     applyingRemote = true;
+void CodeEditor::applyRemoteText(const QString& newText)
+{
+    applyingRemote = true;
+    blockSignals(true);
 
-//     blockSignals(true);
+    int oldPos = SendScintilla(SCI_GETCURRENTPOS);
+    setText(newText);
+    SendScintilla(SCI_CLEARSELECTIONS);
+    SendScintilla(SCI_SETSELECTION, -1, -1);
 
-//     int line, col;
-//     getCursorPosition(&line, &col);
-//     setText(newText);
-//     setCursorPosition(line, col);
+    int maxPos = SendScintilla(SCI_GETTEXTLENGTH);
+    int newPos = qMin(oldPos, maxPos);
 
-//     blockSignals(false);
+    SendScintilla(SCI_SETSEL, newPos, newPos);
 
-//     applyingRemote = false;
-// }
+    SendScintilla(SCI_SCROLLCARET);
+    update();
+
+    blockSignals(false);
+    applyingRemote = false;
+}

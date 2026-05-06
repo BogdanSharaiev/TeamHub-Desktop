@@ -42,6 +42,24 @@ MainWindow::MainWindow(QWidget *parent)
     updateWindowTitle();
 
     rgamanager = new RGAManager(time(nullptr) ,this);
+    connect(rgamanager, &RGAManager::textChanged,
+            this, [this](const QString& text)
+            {
+                CodeEditor* ed = qobject_cast<CodeEditor*>(editorTabs->currentWidget());
+                if (!ed) return;
+
+                ed->applyRemoteText(text);
+            });
+
+    connect(rgamanager, &RGAManager::onInitReceived,
+            this, [this](const QString& text, const QString& filename)
+            {
+                auto ed = createTab(filename);
+                ed->applyRemoteText(text);
+                editorTabs->setCurrentWidget(ed);
+                rgamanager->debug();
+                outputPane->appendPlainText("[TeamHub] Snapshot received: " + filename);
+            });
 }
 
 MainWindow::~MainWindow() = default;
@@ -64,6 +82,22 @@ void MainWindow::closeEvent(QCloseEvent *event)
     event->accept();
 }
 
+CodeEditor* MainWindow::createTab(const QString& name)
+{
+    CodeEditor* ed = new CodeEditor(editorTabs);
+
+    connect(ed, &CodeEditor::localInsert,
+            rgamanager, &RGAManager::localInsert);
+
+    connect(ed, &CodeEditor::cursorPositionUpdated,
+            this, &MainWindow::onCursorPositionUpdated);
+
+    connect(ed, &CodeEditor::modifyChanged,
+            this, &MainWindow::onModificationChanged);
+
+    editorTabs->addTab(ed, name);
+    return ed;
+}
 
 void MainWindow::setupMenuBar()
 {
@@ -125,7 +159,7 @@ void MainWindow::setupMenuBar()
     }) a->setEnabled(false);
 
     QMenu *teamMenu = menuBar()->addMenu("&Team");
-    teamMenu->addAction("Connect to Server")->setEnabled(false);
+    teamMenu->addAction("Connect to Server", this, &MainWindow::joinCollab);
     teamMenu->addSeparator();
     teamMenu->addAction("Members")->setEnabled(false);
     teamMenu->addAction("Share Session")->setEnabled(false);
@@ -186,6 +220,41 @@ void MainWindow::startCollab(const QString room){
     rgamanager->connectToServer(url);
     rgamanager->buildFromText(activeEditor->text());
     outputPane->appendPlainText("[TeamHub] Connecting to room: " + room);
+    QString path = activeEditor->getFilePath();
+    QString text = activeEditor->text();
+    qDebug() << text;
+    qDebug() << rgamanager->getText();
+    connect(rgamanager, &RGAManager::connected, this,
+            [this, text, path]() {
+
+                rgamanager->buildFromText(text);
+                rgamanager->sendInitText(text, path);
+
+                outputPane->appendPlainText("[TeamHub] Synced after connect");
+            });
+}
+
+void MainWindow::joinCollab(){
+    bool ok;
+    QString room = QInputDialog::getText(
+        this,
+        "Join Collaboration",
+        "Enter room name:",
+        QLineEdit::Normal,
+        "",
+        &ok
+        );
+
+    if (!ok || room.isEmpty())
+        return;
+
+    QString url = QString("ws://localhost:8765/%1").arg(room);
+    CodeEditor* activeEditor = qobject_cast<CodeEditor*>(
+        editorTabs->currentWidget());
+    rgamanager->disconnectFromServer();
+    rgamanager->connectToServer(url);
+    clearTabs();
+
 }
 
 void MainWindow::setupCentralWidget()
@@ -908,3 +977,4 @@ void MainWindow::toggleVoipDock()
     voipDock->setVisible(!voipDock->isVisible());
     btnVoip->setChecked(voipDock->isVisible());
 }
+

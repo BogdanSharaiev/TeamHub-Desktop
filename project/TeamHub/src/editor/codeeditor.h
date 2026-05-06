@@ -30,7 +30,8 @@ public:
     bool isModified() const;
     int  currentLine() const;
     int  currentColumn() const;
-
+    void applyRemoteText(const QString& text);
+    bool applyingRemote = false;
 public slots:
     void resetZoom();
     void onCursorChanged(int line, int index);
