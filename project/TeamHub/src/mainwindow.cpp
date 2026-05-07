@@ -88,7 +88,8 @@ CodeEditor* MainWindow::createTab(const QString& name)
 
     connect(ed, &CodeEditor::localInsert,
             rgamanager, &RGAManager::localInsert);
-
+    connect(ed, &CodeEditor::localDelete,
+            rgamanager, &RGAManager::localRemove);
     connect(ed, &CodeEditor::cursorPositionUpdated,
             this, &MainWindow::onCursorPositionUpdated);
 
@@ -383,6 +384,8 @@ void MainWindow::openFileFromBrowser(const QString& path)
             this, &MainWindow::onModificationChanged);
     connect(newEditor, &CodeEditor::localInsert,
             rgamanager, &RGAManager::localInsert);
+    connect(newEditor, &CodeEditor::localDelete,
+            rgamanager, &RGAManager::localRemove);
     const QString name = QFileInfo(path).fileName();
     int index = editorTabs->addTab(newEditor, name);
     editorTabs->setCurrentIndex(index);
@@ -893,6 +896,8 @@ void MainWindow::openFile()
             this, &MainWindow::onModificationChanged);
     connect(newEditor, &CodeEditor::localInsert,
             rgamanager, &RGAManager::localInsert);
+    connect(newEditor, &CodeEditor::localDelete,
+            rgamanager, &RGAManager::localRemove);
     const QString name = QFileInfo(path).fileName();
     int index = editorTabs->addTab(newEditor, name);
     editorTabs->setCurrentIndex(index);

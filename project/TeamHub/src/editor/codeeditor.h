@@ -46,6 +46,7 @@ signals:
     void cursorPositionUpdated(int line, int index);
     void modifyChanged(bool modified);
     void localInsert(int position, QChar ch);
+    void localDelete(int position);
 
 protected:
     void keyPressEvent(QKeyEvent* event) override;

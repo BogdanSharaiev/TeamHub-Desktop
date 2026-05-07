@@ -37,9 +37,6 @@ CodeEditor::CodeEditor(QWidget* parent)
     connect(this, SIGNAL(textChanged()),                    this, SIGNAL(fileModified()));
     connect(this, SIGNAL(cursorPositionChanged(int,int)),   this, SLOT(onCursorChanged(int,int)));
     connect(this, SIGNAL(modificationChanged(bool)),        this, SLOT(onModified(bool)));
-
-    connect(this, SIGNAL(SCN_CHARADDED(int)),
-            this, SLOT(onCharAdded(int)));
 }
 
 void CodeEditor::setupLexer()
@@ -124,6 +121,11 @@ void CodeEditor::onModified(bool modified){
 
 void CodeEditor::keyPressEvent(QKeyEvent* event)
 {
+    if (applyingRemote) {
+        QsciScintilla::keyPressEvent(event);
+        return;
+    }
+
     if (handleBackspaceInPair(event)) return;
     if (skipClosingChar(event))       return;
     if (autoCloseChar(event))         return;
@@ -132,15 +134,43 @@ void CodeEditor::keyPressEvent(QKeyEvent* event)
     const int key = event->key();
 
     if (mod == Qt::ControlModifier) {
-        if (key == Qt::Key_S){
-            if (!filePath.isEmpty()) {
-                saveFile(filePath);
-            }
+        if (key == Qt::Key_S) {
+            if (!filePath.isEmpty()) saveFile(filePath);
             return;
         }
-        if (key == Qt::Key_Plus || key == Qt::Key_Equal) { zoomIn();         return; }
-        if (key == Qt::Key_Minus)                        { zoomOut();        return; }
-        if (key == Qt::Key_0)                            { resetZoom();      return; }
+        if (key == Qt::Key_Plus || key == Qt::Key_Equal) { zoomIn();    return; }
+        if (key == Qt::Key_Minus)                        { zoomOut();   return; }
+        if (key == Qt::Key_0)                            { resetZoom(); return; }
+    }
+
+    if (mod == Qt::NoModifier || mod == Qt::ShiftModifier) {
+        QString txt = event->text();
+        if (!txt.isEmpty()) {
+            QChar ch = txt.at(0);
+            if (ch.isPrint() || ch == '\n' || ch == '\r') {
+                int pos = SendScintilla(SCI_GETCURRENTPOS);
+                QChar sendChar = (ch == '\r') ? QChar('\n') : ch;
+                QsciScintilla::keyPressEvent(event);
+                emit localInsert(pos, sendChar);
+                return;
+            }
+        }
+
+        if (key == Qt::Key_Backspace && mod == Qt::NoModifier) {
+            int pos = SendScintilla(SCI_GETCURRENTPOS);
+            if (pos > 0) {
+                QsciScintilla::keyPressEvent(event);
+                emit localDelete(pos - 1);
+                return;
+            }
+        }
+
+        if (key == Qt::Key_Delete && mod == Qt::NoModifier) {
+            int pos = SendScintilla(SCI_GETCURRENTPOS);
+            QsciScintilla::keyPressEvent(event);
+            emit localDelete(pos);
+            return;
+        }
     }
 
     QsciScintilla::keyPressEvent(event);
