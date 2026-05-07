@@ -7,7 +7,7 @@ PORT = 8765
 
 rooms: dict[str, set] = {}
 history: dict[str, list[dict]] = {}
-snapshots: dict[str, str] = {}
+snapshots: dict[str, dict] = {}
 
 
 def get_room_from_path(path):
@@ -66,14 +66,11 @@ async def handle_client(websocket):
     room = get_room_from_path(websocket.request.path)
     rooms.setdefault(room, set()).add(websocket)
     history.setdefault(room, [])
-    snapshots.setdefault(room, "")
+    snapshots.setdefault(room, {})
 
     print(f"[JOIN] room={room}, clients={len(rooms[room])}")
     if snapshots[room]:
-        await send_json(websocket, {
-            "type": "snapshot",
-            "text": snapshots[room]
-        })
+        await send_json(websocket, snapshots[room])
     for operation in history[room]:
         await send_json(websocket, operation)
     try:
@@ -89,11 +86,9 @@ async def handle_client(websocket):
             if not is_operation(payload):
                 if is_snapshot(payload):
                     if not snapshots[room]:
-                        snapshots[room] = payload.get("text", "")
-
+                        snapshots[room] = payload
                         await broadcast(room, websocket, payload)
                         print(f"[SNAPSHOT] room={room} set")
-
                     continue
                 await send_json(websocket, {
                     "type": "error",

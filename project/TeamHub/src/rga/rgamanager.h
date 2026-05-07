@@ -18,7 +18,7 @@ public:
     bool isConnected();
     QString getText();
     void buildFromText(const QString& text);
-    void sendInitText(const QString text, const QString path);
+    void sendInitText(const QString& text, const QString& path);
     void debug();
 signals:
     void textChanged(const QString& newText);
@@ -37,10 +37,12 @@ private:
     void remoteInsert(const RGANode& node);
     void remoteDelete(const RGAId& id);
     QJsonObject nodeToJson(const RGANode& node);
-    QJsonObject idToJson(const RGAId& id);
+    QJsonObject idToJson(const RGAId& id) const;
     RGANode     jsonToNode(const QJsonObject& obj);
-    RGAId       jsonToId(const QJsonObject& obj);
+    RGAId       jsonToId(const QJsonObject& obj) const;
     void sendMessage(const QJsonObject& msg);
+    QJsonArray sequenceToJson() const;
+    void sequenceFromJson(const QJsonArray& arr);
 
     RGASequence sequence;
     QWebSocket* socket;

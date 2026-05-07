@@ -115,11 +115,17 @@ void RGAManager::onMessageReceived(const QString& message)
         RGAId id = jsonToId(obj["id"].toObject());
         remoteDelete(id);
     }
-    else if(type == "snapshot"){
-        QString text = obj["text"].toString();
+    else if (type == "snapshot") {
         QString path = obj["path"].toString();
         QString filename = QFileInfo(path).fileName();
-        buildFromText(text);
+
+        if (obj.contains("sequence")) {
+            sequenceFromJson(obj["sequence"].toArray());
+        } else {
+            QString text = obj["text"].toString();
+            buildFromText(text);
+        }
+
         emit onInitReceived(sequence.toText(), filename);
     }
 }
@@ -130,7 +136,7 @@ void RGAManager::onError(QAbstractSocket::SocketError error)
     emit errorOccurred(socket->errorString());
 }
 
-QJsonObject RGAManager::idToJson(const RGAId& id)
+QJsonObject RGAManager::idToJson(const RGAId& id) const
 {
     QJsonObject obj;
     obj["timestamp"] = id.timestamp;
@@ -148,7 +154,7 @@ QJsonObject RGAManager::nodeToJson(const RGANode& node)
     return obj;
 }
 
-RGAId RGAManager::jsonToId(const QJsonObject& obj)
+RGAId RGAManager::jsonToId(const QJsonObject& obj) const
 {
     RGAId id;
     id.timestamp = obj["timestamp"].toInt();
@@ -197,14 +203,15 @@ void RGAManager::buildFromText(const QString& text)
     }
 }
 
-void RGAManager::sendInitText(const QString text, const QString path){
+void RGAManager::sendInitText(const QString& text, const QString& path)
+{
     QJsonObject msg;
-    msg["type"] = "snapshot";
-    msg["text"] = text;
-    msg["path"] = path;
+    msg["type"]     = "snapshot";
+    msg["text"]     = text;
+    msg["path"]     = path;
+    msg["sequence"] = sequenceToJson();
     sendMessage(msg);
 }
-
 void RGAManager::debug()
 {
     for (const RGANode& node : sequence.rgaseq) {
@@ -212,5 +219,30 @@ void RGAManager::debug()
                  << "ID:" << node.id.timestamp << node.id.siteId
                  << "PARENT:" << node.parent.timestamp << node.parent.siteId
                  << "TOMBSTONE:" << node.tombstone;
+    }
+}
+
+QJsonArray RGAManager::sequenceToJson() const
+{
+    QJsonArray arr;
+    for (const RGANode& node : sequence.rgaseq) {
+        QJsonObject obj;
+        obj["id"]        = idToJson(node.id);
+        obj["parent"]    = idToJson(node.parent);
+        obj["val"]       = QString(node.val);
+        obj["tombstone"] = node.tombstone;
+        arr.append(obj);
+    }
+    return arr;
+}
+
+void RGAManager::sequenceFromJson(const QJsonArray& arr)
+{
+    sequence.clear();
+    timestamp = 0;
+    for (const QJsonValue& val : arr) {
+        RGANode node = jsonToNode(val.toObject());
+        sequence.rgaseq.append(node);
+        timestamp = qMax(timestamp, node.id.timestamp);
     }
 }
