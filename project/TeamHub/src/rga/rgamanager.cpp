@@ -81,13 +81,13 @@ void RGAManager::remoteInsert(const RGANode& node)
 {
     timestamp = qMax(timestamp, node.id.timestamp) + 1;
     sequence.insert(node);
-    emit textChanged(sequence.toText());
+    emit remoteTextChanged(sequence.toText());
 }
 
 void RGAManager::remoteDelete(const RGAId& id)
 {
     sequence.remove(id);
-    emit textChanged(sequence.toText());
+    emit remoteTextChanged(sequence.toText());
 }
 
 void RGAManager::onConnected()

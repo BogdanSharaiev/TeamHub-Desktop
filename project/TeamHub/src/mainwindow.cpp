@@ -42,7 +42,7 @@ MainWindow::MainWindow(QWidget *parent)
     updateWindowTitle();
 
     rgamanager = new RGAManager(time(nullptr) ,this);
-    connect(rgamanager, &RGAManager::textChanged,
+    connect(rgamanager, &RGAManager::remoteTextChanged,
             this, [this](const QString& text)
             {
                 CodeEditor* ed = qobject_cast<CodeEditor*>(editorTabs->currentWidget());
@@ -57,7 +57,11 @@ MainWindow::MainWindow(QWidget *parent)
                 auto ed = createTab(filename);
                 ed->applyRemoteText(text);
                 editorTabs->setCurrentWidget(ed);
-                rgamanager->debug();
+
+                connect(ed, &CodeEditor::localInsert,
+                        rgamanager, &RGAManager::localInsert);
+                connect(ed, &CodeEditor::localDelete,
+                        rgamanager, &RGAManager::localRemove);
                 outputPane->appendPlainText("[TeamHub] Snapshot received: " + filename);
             });
 }
@@ -85,11 +89,6 @@ void MainWindow::closeEvent(QCloseEvent *event)
 CodeEditor* MainWindow::createTab(const QString& name)
 {
     CodeEditor* ed = new CodeEditor(editorTabs);
-
-    connect(ed, &CodeEditor::localInsert,
-            rgamanager, &RGAManager::localInsert);
-    connect(ed, &CodeEditor::localDelete,
-            rgamanager, &RGAManager::localRemove);
     connect(ed, &CodeEditor::cursorPositionUpdated,
             this, &MainWindow::onCursorPositionUpdated);
 
@@ -191,21 +190,21 @@ void MainWindow::setupMainToolBar()
     tb->addSeparator();
 
     auto *actCollab = tb->addAction("Collab");
-    connect(actCollab, &QAction::triggered, this, [this]() {
-        bool ok;
-        QString room = QInputDialog::getText(
-            this,
-            "Join Collaboration",
-            "Enter room name:",
-            QLineEdit::Normal,
-            "",
-            &ok
-            );
-
-        if (!ok || room.isEmpty())
-            return;
-
-        startCollab(room);
+    actCollab->setCheckable(true);
+    connect(actCollab, &QAction::triggered, this, [this](bool checked) {
+        if (checked) {
+            bool ok;
+            QString room = QInputDialog::getText(
+                this, "Join Collaboration",
+                "Enter room name:", QLineEdit::Normal, "", &ok);
+            if (!ok || room.isEmpty()) {
+                qobject_cast<QAction*>(sender())->setChecked(false);
+                return;
+            }
+            startCollab(room);
+        } else {
+            stopCollab();
+        }
     });
 
     auto *actCall = tb->addAction("Call");
@@ -213,49 +212,60 @@ void MainWindow::setupMainToolBar()
     connect(actCall, &QAction::triggered, this, &MainWindow::toggleVoipDock);
 }
 
-void MainWindow::startCollab(const QString room){
-    QString url = QString("ws://localhost:8765/%1").arg(room);
+void MainWindow::startCollab(const QString& room)
+{
     CodeEditor* activeEditor = qobject_cast<CodeEditor*>(
         editorTabs->currentWidget());
+    if (!activeEditor) return;
+
+    QString url  = QString("ws://localhost:8765/%1").arg(room);
+    QString text = activeEditor->text();
+    QString path = activeEditor->getFilePath();
+
     rgamanager->disconnectFromServer();
     rgamanager->connectToServer(url);
-    rgamanager->buildFromText(activeEditor->text());
-    outputPane->appendPlainText("[TeamHub] Connecting to room: " + room);
-    QString path = activeEditor->getFilePath();
-    QString text = activeEditor->text();
-    qDebug() << text;
-    qDebug() << rgamanager->getText();
+
+    connect(activeEditor, &CodeEditor::localInsert,
+            rgamanager, &RGAManager::localInsert);
+    connect(activeEditor, &CodeEditor::localDelete,
+            rgamanager, &RGAManager::localRemove);
+
     connect(rgamanager, &RGAManager::connected, this,
             [this, text, path]() {
-
                 rgamanager->buildFromText(text);
                 rgamanager->sendInitText(text, path);
-
-                outputPane->appendPlainText("[TeamHub] Synced after connect");
-            });
+                outputPane->appendPlainText("[TeamHub] Collab started");
+            }, Qt::SingleShotConnection);
 }
 
-void MainWindow::joinCollab(){
+void MainWindow::joinCollab()
+{
     bool ok;
     QString room = QInputDialog::getText(
-        this,
-        "Join Collaboration",
-        "Enter room name:",
-        QLineEdit::Normal,
-        "",
-        &ok
-        );
+        this, "Join Collaboration",
+        "Enter room name:", QLineEdit::Normal, "", &ok);
 
-    if (!ok || room.isEmpty())
-        return;
+    if (!ok || room.isEmpty()) return;
 
     QString url = QString("ws://localhost:8765/%1").arg(room);
-    CodeEditor* activeEditor = qobject_cast<CodeEditor*>(
-        editorTabs->currentWidget());
     rgamanager->disconnectFromServer();
     rgamanager->connectToServer(url);
     clearTabs();
 
+    outputPane->appendPlainText("[TeamHub] Joining room: " + room);
+}
+
+void MainWindow::stopCollab()
+{
+    CodeEditor* activeEditor = qobject_cast<CodeEditor*>(editorTabs->currentWidget());
+    if (activeEditor) {
+        disconnect(activeEditor, &CodeEditor::localInsert,
+                   rgamanager, &RGAManager::localInsert);
+        disconnect(activeEditor, &CodeEditor::localDelete,
+                   rgamanager, &RGAManager::localRemove);
+    }
+    rgamanager->disconnectFromServer();
+    outputPane->appendPlainText("[Collab] Session stopped.");
 }
 
 void MainWindow::setupCentralWidget()
@@ -382,10 +392,7 @@ void MainWindow::openFileFromBrowser(const QString& path)
             this, &MainWindow::onCursorPositionUpdated);
     connect(newEditor, &CodeEditor::modifyChanged,
             this, &MainWindow::onModificationChanged);
-    connect(newEditor, &CodeEditor::localInsert,
-            rgamanager, &RGAManager::localInsert);
-    connect(newEditor, &CodeEditor::localDelete,
-            rgamanager, &RGAManager::localRemove);
+
     const QString name = QFileInfo(path).fileName();
     int index = editorTabs->addTab(newEditor, name);
     editorTabs->setCurrentIndex(index);
@@ -894,10 +901,7 @@ void MainWindow::openFile()
             this, &MainWindow::onCursorPositionUpdated);
     connect(newEditor, &CodeEditor::modifyChanged,
             this, &MainWindow::onModificationChanged);
-    connect(newEditor, &CodeEditor::localInsert,
-            rgamanager, &RGAManager::localInsert);
-    connect(newEditor, &CodeEditor::localDelete,
-            rgamanager, &RGAManager::localRemove);
+
     const QString name = QFileInfo(path).fileName();
     int index = editorTabs->addTab(newEditor, name);
     editorTabs->setCurrentIndex(index);

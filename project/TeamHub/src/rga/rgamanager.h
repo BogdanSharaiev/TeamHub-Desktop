@@ -22,6 +22,7 @@ public:
     void debug();
 signals:
     void textChanged(const QString& newText);
+    void remoteTextChanged(const QString& newText);
     void connected();
     void disconnected();
     void errorOccurred(const QString& error);
