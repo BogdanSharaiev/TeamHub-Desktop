@@ -11,7 +11,7 @@ struct RGAId{
         return timestamp == other.timestamp && siteId == other.siteId;
     }
     bool operator!=(const RGAId& other) const{
-        return timestamp != other.timestamp && siteId != other.siteId;
+        return timestamp != other.timestamp || siteId != other.siteId;
     }
 };
 

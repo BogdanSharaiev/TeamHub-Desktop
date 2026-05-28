@@ -1,4 +1,4 @@
-QT += widgets core websockets
+QT += widgets core websockets multimedia
 
 CONFIG += c++17
 
@@ -18,7 +18,8 @@ SOURCES += \
     src/mainwindow.cpp \
     src/rga/rgamanager.cpp \
     src/rga/rgaseq.cpp \
-    src/terminal/terminal.cpp
+    src/terminal/terminal.cpp \
+    src/voicechat/voicechat.cpp
 
 HEADERS += \
     src/crdt/rganode.h \
@@ -27,7 +28,8 @@ HEADERS += \
     src/filebrowser/filebrowser.h \
     src/mainwindow.h \
     src/rga/rgamanager.h \
-    src/terminal/terminal.h
+    src/terminal/terminal.h \
+    src/voicechat/voicechat.h
 
 qnx: target.path = /tmp/$${TARGET}/bin
 else: unix:!android: target.path = /opt/$${TARGET}/bin

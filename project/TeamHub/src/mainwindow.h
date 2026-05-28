@@ -17,6 +17,8 @@
 #include "filebrowser/filebrowser.h"
 #include "terminal/terminal.h"
 #include "rga/rgamanager.h"
+#include "voicechat/voicechat.h"
+
 
 class MainWindow : public QMainWindow
 {

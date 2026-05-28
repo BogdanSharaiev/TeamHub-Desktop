@@ -37,20 +37,13 @@ void RGASequence::insert(const RGANode& node)
         }
     }
 
-    if (!parentFound && !isRootId(node.parent)) {
+    if (!parentFound && !isRootId(node.parent))
         return;
-    }
-    if (parentFound) {
-        while (insertIndex < rgaseq.size()
-               && rgaseq[insertIndex].parent == node.parent
-               && greaterById(rgaseq[insertIndex].id, node.id)) {
-            ++insertIndex;
-        }
-    } else {
-        while (insertIndex < rgaseq.size()
-               && lessById(rgaseq[insertIndex].id, node.id)) {
-            ++insertIndex;
-        }
+
+    while (insertIndex < rgaseq.size()
+           && rgaseq[insertIndex].parent == node.parent
+           && greaterById(rgaseq[insertIndex].id, node.id)) {
+        ++insertIndex;
     }
 
     rgaseq.insert(insertIndex, node);
