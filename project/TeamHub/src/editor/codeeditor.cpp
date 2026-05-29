@@ -152,6 +152,17 @@ void CodeEditor::keyPressEvent(QKeyEvent* event)
                 QChar sendChar = (ch == '\r') ? QChar('\n') : ch;
                 QsciScintilla::keyPressEvent(event);
                 emit localInsert(pos, sendChar);
+
+                if (sendChar == '\n') {
+                    int newPos = SendScintilla(SCI_GETCURRENTPOS);
+                    int indentLen = newPos - (pos + 1);
+                    if (indentLen > 0) {
+                        QString fullText = text();
+                        for (int i = 0; i < indentLen; i++) {
+                            emit localInsert(pos + 1 + i, fullText.at(pos + 1 + i));
+                        }
+                    }
+                }
                 return;
             }
         }
@@ -199,8 +210,12 @@ bool CodeEditor::autoCloseChar(QKeyEvent* event)
         if (!selected.isEmpty()) {
             replaceSelectedText(QString(open) + selected + close);
         } else {
+            int pos = SendScintilla(SCI_GETCURRENTPOS);
             QsciScintilla::keyPressEvent(event);
             insert(QString(close));
+
+            emit localInsert(pos, open);
+            emit localInsert(pos + 1, close);
         }
         return true;
     }
@@ -246,8 +261,11 @@ bool CodeEditor::handleBackspaceInPair(QKeyEvent* event)
 
     for (const auto& [open, close] : kAutoPairs) {
         if (before == open && after == close) {
+            int pos = SendScintilla(SCI_GETCURRENTPOS);
             setSelection(line, col - 1, line, col + 1);
             removeSelectedText();
+            emit localDelete(pos);
+            emit localDelete(pos - 1);
             return true;
         }
     }
