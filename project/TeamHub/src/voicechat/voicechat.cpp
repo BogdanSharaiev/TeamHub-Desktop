@@ -54,6 +54,8 @@ VoiceChat::VoiceChat(QObject* parent)
     stunTimer->setInterval(STUN_TIMEOUT);
     connect(stunTimer, &QTimer::timeout,
             this, &VoiceChat::onStunTimeout);
+
+    publicId = time(nullptr)%1000;
 }
 
 VoiceChat::~VoiceChat()
@@ -105,6 +107,19 @@ void VoiceChat::startCall()
     audioSource = new QAudioSource(inputDev, fmt, this);
     audioSource->setBufferSize(640);
     audioInput = audioSource->start();
+    int err;
+    opusEncoder = opus_encoder_create(16000, 1, OPUS_APPLICATION_VOIP, &err);
+    if (err != OPUS_OK) {
+        emit statusChanged("Opus encoder error: " + QString(opus_strerror(err)));
+        return;
+    }
+    opus_encoder_ctl(opusEncoder, OPUS_SET_BITRATE(24000)); // 24 kbps
+
+    opusDecoder = opus_decoder_create(16000, 1, &err);
+    if (err != OPUS_OK) {
+        emit statusChanged("Opus decoder error: " + QString(opus_strerror(err)));
+        return;
+    }
     connect(audioInput, &QIODevice::readyRead,
             this, &VoiceChat::onAudioInputReady);
 
@@ -117,6 +132,7 @@ void VoiceChat::startCall()
 
 void VoiceChat::stopCall()
 {
+    punchTimer->stop();
     if (audioSource) {
         audioSource->stop();
         delete audioSource;
@@ -125,6 +141,14 @@ void VoiceChat::stopCall()
     }
     for (PeerInfo& peer : peers)
         destroyPeerSink(peer);
+    if (opusEncoder) {
+        opus_encoder_destroy(opusEncoder);
+        opusEncoder = nullptr;
+    }
+    if (opusDecoder) {
+        opus_decoder_destroy(opusDecoder);
+        opusDecoder = nullptr;
+    }
 }
 
 bool VoiceChat::isCallActive() const
@@ -250,48 +274,102 @@ void VoiceChat::registerWithServer()
     msg["type"] = "register";
     msg["ip"]   = publicIp;
     msg["port"] = static_cast<int>(publicPort);
+    msg["id"]   = publicId;
+
     webSocket->sendTextMessage(
         QJsonDocument(msg).toJson(QJsonDocument::Compact));
 }
 
 void VoiceChat::updatePeerList(const QJsonArray& peerArray)
 {
-    struct Entry { QString ip; quint16 port; };
+    struct Entry
+    {
+        QString ip;
+        quint16 port;
+        int id;
+    };
+
     QList<Entry> incoming;
-    for (const QJsonValue& v : peerArray) {
+
+    for (const QJsonValue& v : peerArray)
+    {
         QJsonObject o = v.toObject();
-        Entry e{ o.value("ip").toString(), quint16(o.value("port").toInt()) };
-        if (e.ip == publicIp && e.port == publicPort) continue;
+
+        Entry e{
+            o.value("ip").toString(),
+            quint16(o.value("port").toInt()),
+            o.value("id").toInt()
+        };
+
+        if (e.id == publicId)
+            continue;
+
         incoming.append(e);
     }
 
-    for (int i = peers.size() - 1; i >= 0; --i) {
+    for (int i = peers.size() - 1; i >= 0; --i)
+    {
         bool found = false;
+
         for (const Entry& e : incoming)
-            if (e.ip == peers[i].ip && e.port == peers[i].port)
-            { found = true; break; }
-        if (!found) {
+        {
+            if (e.id == peers[i].id)
+            {
+                found = true;
+                break;
+            }
+        }
+
+        if (!found)
+        {
             emit peerDisconnected(peers[i].ip, peers[i].port);
+
             destroyPeerSink(peers[i]);
+
             peers.removeAt(i);
         }
     }
 
-    for (const Entry& e : incoming) {
+    for (const Entry& e : incoming)
+    {
         bool already = false;
+
         for (const PeerInfo& p : std::as_const(peers))
-            if (p.ip == e.ip && p.port == e.port) { already = true; break; }
-        if (!already) {
+        {
+            if (p.id == e.id)
+            {
+                already = true;
+                break;
+            }
+        }
+
+        if (!already)
+        {
             PeerInfo peer;
             peer.ip   = e.ip;
             peer.port = e.port;
+            peer.id   = e.id;
+
             peers.append(peer);
+
+            emit statusChanged(
+                QString("New peer: %1:%2 [%3]")
+                    .arg(peer.ip)
+                    .arg(peer.port)
+                    .arg(peer.id));
         }
     }
 
     bool anyUnconnected = false;
+
     for (const PeerInfo& p : std::as_const(peers))
-        if (!p.connected) { anyUnconnected = true; break; }
+    {
+        if (!p.connected)
+        {
+            anyUnconnected = true;
+            break;
+        }
+    }
 
     if (anyUnconnected && !punchTimer->isActive())
         punchTimer->start();
@@ -335,8 +413,10 @@ void VoiceChat::onUdpReadyRead()
         for (int i = 0; i < peers.size(); ++i) {
             const PeerInfo& p = peers[i];
             if (p.port == senderPort &&
-                (p.ip == senderIp || p.ip == senderAddr.toString())) {
-                idx = i; break;
+                p.ip == senderIp)
+            {
+                idx = i;
+                break;
             }
         }
 
@@ -349,7 +429,19 @@ void VoiceChat::onUdpReadyRead()
         if (idx != -1) {
             PeerInfo& peer = peers[idx];
             if (!peer.connected) markPeerConnected(idx);
-            if (peer.output) peer.output->write(data);
+            if (peer.output && opusDecoder) {
+                QByteArray pcmOut(OPUS_FRAME_SIZE * 2, '\0');
+                int samples = opus_decode(
+                    opusDecoder,
+                    reinterpret_cast<const uchar*>(data.constData()),
+                    data.size(),
+                    reinterpret_cast<opus_int16*>(pcmOut.data()),
+                    OPUS_FRAME_SIZE,
+                    0
+                    );
+                if (samples > 0)
+                    peer.output->write(pcmOut.left(samples * 2));
+            }
         }
     }
 }
@@ -357,11 +449,34 @@ void VoiceChat::onUdpReadyRead()
 void VoiceChat::onAudioInputReady()
 {
     QByteArray pcm = audioInput->readAll();
-    if (pcm.isEmpty()) return;
-    for (const PeerInfo& peer : std::as_const(peers))
-        if (peer.connected)
-            udpSocket->writeDatagram(
-                pcm, QHostAddress(peer.ip), peer.port);
+    if (pcm.isEmpty() || !opusEncoder) return;
+
+    int totalSamples = pcm.size() / 2;
+    int offset = 0;
+
+    while (offset + OPUS_FRAME_SIZE * 2 <= pcm.size()) {
+        const opus_int16* pcmData =
+            reinterpret_cast<const opus_int16*>(pcm.constData() + offset);
+
+        QByteArray encoded(4000, '\0');
+        int encodedLen = opus_encode(
+            opusEncoder,
+            pcmData,
+            OPUS_FRAME_SIZE,
+            reinterpret_cast<uchar*>(encoded.data()),
+            encoded.size()
+            );
+
+        if (encodedLen > 0) {
+            encoded.resize(encodedLen);
+            for (const PeerInfo& peer : std::as_const(peers))
+                if (peer.connected)
+                    udpSocket->writeDatagram(
+                        encoded, QHostAddress(peer.ip), peer.port);
+        }
+
+        offset += OPUS_FRAME_SIZE * 2;
+    }
 }
 
 void VoiceChat::createPeerSink(PeerInfo& peer)

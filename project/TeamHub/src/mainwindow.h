@@ -12,6 +12,7 @@
 #include <QTabWidget>
 #include <QToolButton>
 #include <QTreeWidget>
+#include <QPushButton>
 
 #include "editor/codeeditor.h"
 #include "filebrowser/filebrowser.h"
@@ -74,6 +75,14 @@ private:
     // RGA Colab
     RGAManager* rgamanager;
 
+    // Voice
+    VoiceChat* voiceChat;
+    QLabel*    voipStatusLabel;
+    QLabel*    voipPeersLabel;
+    QPushButton* voipConnectBtn;
+    QPushButton* voipCallBtn;
+
+
     //Setup UI
     void setupMenuBar();
     void setupMainToolBar();
@@ -115,6 +124,11 @@ private slots:
     void startCollab(const QString& room);
     void joinCollab();
     void stopCollab();
+
+    void onVoipCallClicked();
+    void onVoipStatusChanged(const QString& status);
+    void onVoipPeerConnected(const QString& ip, quint16 port);
+    void onVoipPeerDisconnected(const QString& ip, quint16 port);
 };
 
 #endif // MAINWINDOW_H

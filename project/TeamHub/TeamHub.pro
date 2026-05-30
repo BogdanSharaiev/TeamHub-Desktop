@@ -1,9 +1,9 @@
 QT += widgets core websockets multimedia
-
 CONFIG += c++17
 
 INCLUDEPATH += libs/include
-LIBS        += -L$$PWD/libs -lqscintilla2_qt6d
+
+LIBS += -L$$PWD/libs -lqscintilla2_qt6d -lopus
 
 win32 {
     QMAKE_POST_LINK += $$QMAKE_COPY \

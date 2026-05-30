@@ -64,9 +64,60 @@ MainWindow::MainWindow(QWidget *parent)
                         rgamanager, &RGAManager::localRemove);
                 outputPane->appendPlainText("[TeamHub] Snapshot received: " + filename);
             });
+
+    voiceChat = new VoiceChat(this);
+
+    connect(voiceChat, &VoiceChat::statusChanged,
+            this, &MainWindow::onVoipStatusChanged);
+    connect(voiceChat, &VoiceChat::peerConnected,
+            this, &MainWindow::onVoipPeerConnected);
+    connect(voiceChat, &VoiceChat::peerDisconnected,
+            this, &MainWindow::onVoipPeerDisconnected);
+    connect(voiceChat, &VoiceChat::connectedToServer, this, [this]() {
+        voipConnectBtn->setText("Disconnect");
+        voipCallBtn->setEnabled(true);
+    });
+    connect(voiceChat, &VoiceChat::disconnectedFromServer, this, [this]() {
+        voipConnectBtn->setText("Connect");
+        voipCallBtn->setEnabled(false);
+        voipCallBtn->setText("Start Call");
+        voipPeersLabel->setText("Peers: none");
+    });
 }
 
 MainWindow::~MainWindow() = default;
+
+void MainWindow::onVoipStatusChanged(const QString& status)
+{
+    voipStatusLabel->setText(status);
+    outputPane->appendPlainText("[VoIP] " + status);
+}
+
+void MainWindow::onVoipCallClicked()
+{
+    if (voiceChat->isCallActive()) {
+        voiceChat->stopCall();
+        voipCallBtn->setText("Start Call");
+    } else {
+        voiceChat->startCall();
+        voipCallBtn->setText("Stop Call");
+    }
+}
+
+void MainWindow::onVoipPeerConnected(const QString& ip, quint16 port)
+{
+    voipPeersLabel->setText(
+        QString("Peer: %1:%2 ✓").arg(ip).arg(port));
+    outputPane->appendPlainText(
+        QString("[VoIP] P2P link up: %1:%2").arg(ip).arg(port));
+}
+
+void MainWindow::onVoipPeerDisconnected(const QString& ip, quint16 port)
+{
+    voipPeersLabel->setText("Peers: none");
+    outputPane->appendPlainText(
+        QString("[VoIP] Peer left: %1:%2").arg(ip).arg(port));
+}
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
@@ -466,36 +517,70 @@ void MainWindow::setupVoipDock()
     voipDock = new QDockWidget("Voice", this);
     voipDock->setObjectName("voipDock");
     voipDock->setFeatures(QDockWidget::DockWidgetClosable  |
-                            QDockWidget::DockWidgetMovable   |
-                            QDockWidget::DockWidgetFloatable);
+                          QDockWidget::DockWidgetMovable   |
+                          QDockWidget::DockWidgetFloatable);
     voipDock->setAllowedAreas(Qt::RightDockWidgetArea | Qt::LeftDockWidgetArea);
 
-    auto *panel = new QWidget;
+    auto* panel = new QWidget;
     panel->setObjectName("voipPanel");
-    auto *vbox = new QVBoxLayout(panel);
+    auto* vbox = new QVBoxLayout(panel);
     vbox->setContentsMargins(12, 12, 12, 12);
-    vbox->setSpacing(12);
+    vbox->setSpacing(8);
 
-    auto *statusLbl = new QLabel("Not connected");
-    statusLbl->setAlignment(Qt::AlignCenter);
-    statusLbl->setObjectName("stubLabel");
-    vbox->addWidget(statusLbl);
+    voipStatusLabel = new QLabel("Not connected");
+    voipStatusLabel->setAlignment(Qt::AlignCenter);
+    voipStatusLabel->setWordWrap(true);
+    voipStatusLabel->setObjectName("stubLabel");
+    vbox->addWidget(voipStatusLabel);
+
+    auto* serverEdit = new QLineEdit("localhost");
+    serverEdit->setObjectName("fileSearch");
+    serverEdit->setPlaceholderText("Server host");
+    serverEdit->setObjectName("voipServerEdit");
+    vbox->addWidget(serverEdit);
+
+    auto* portEdit = new QLineEdit("9000");
+    portEdit->setObjectName("fileSearch");
+    portEdit->setPlaceholderText("Port");
+    portEdit->setObjectName("voipPortEdit");
+    vbox->addWidget(portEdit);
+
+    voipConnectBtn = new QPushButton("Connect");
+    voipConnectBtn->setObjectName("voipBtn");
+    vbox->addWidget(voipConnectBtn);
+
+    voipPeersLabel = new QLabel("Peers: none");
+    voipPeersLabel->setAlignment(Qt::AlignCenter);
+    voipPeersLabel->setObjectName("stubLabel");
+    voipPeersLabel->setWordWrap(true);
+    vbox->addWidget(voipPeersLabel);
 
     vbox->addStretch(1);
 
-    auto *noteLbl = new QLabel(
-        "VoIP module\n\n"
-        "Planned: P2P voice over UDP,\nOpus codec, STUN/TURN.");
-    noteLbl->setAlignment(Qt::AlignCenter);
-    noteLbl->setWordWrap(true);
-    noteLbl->setObjectName("stubLabel");
-    vbox->addWidget(noteLbl);
-
-    vbox->addStretch(1);
+    voipCallBtn = new QPushButton("Start Call");
+    voipCallBtn->setObjectName("voipBtn");
+    voipCallBtn->setEnabled(false);
+    vbox->addWidget(voipCallBtn);
 
     voipDock->setWidget(panel);
     addDockWidget(Qt::RightDockWidgetArea, voipDock);
     voipDock->hide();
+
+    connect(voipConnectBtn, &QPushButton::clicked, this, [this, serverEdit, portEdit]() {
+        if (voiceChat->isConnected()) {
+            voiceChat->disconnectFromServer();
+            voipConnectBtn->setText("Connect");
+            voipCallBtn->setEnabled(false);
+        } else {
+            QString host = serverEdit->text().trimmed();
+            quint16 port = portEdit->text().toUShort();
+            if (host.isEmpty() || port == 0) return;
+            voiceChat->connectToServer(host, port);
+        }
+    });
+
+    connect(voipCallBtn, &QPushButton::clicked,
+            this, &MainWindow::onVoipCallClicked);
 }
 
 void MainWindow::setupStatusBar()
@@ -727,7 +812,16 @@ QPlainTextEdit#terminalPane {
 /* ── VoIP Dock ──────────────────────────────────────────────── */
 QDockWidget#voipDock  { color: #cccccc; }
 QWidget#voipPanel     { background: #252526; }
-
+QPushButton#voipBtn {
+    background: #3c3c3c;
+    color: #cccccc;
+    border: 1px solid #555555;
+    border-radius: 3px;
+    padding: 5px 10px;
+}
+QPushButton#voipBtn:hover   { background: #505050; }
+QPushButton#voipBtn:pressed { background: #007acc; }
+QPushButton#voipBtn:disabled { color: #555555; }
 /* ── Shared stub label ──────────────────────────────────────── */
 QLabel#stubLabel { color: #555555; font-size: 11px; }
 
