@@ -88,6 +88,7 @@ private:
 
     OpusEncoder* opusEncoder = nullptr;
     OpusDecoder* opusDecoder = nullptr;
+    QByteArray captureBuffer;
     static constexpr int OPUS_FRAME_SIZE = 320;
 };
 

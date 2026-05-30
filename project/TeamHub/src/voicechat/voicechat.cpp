@@ -105,7 +105,7 @@ void VoiceChat::startCall()
     }
 
     audioSource = new QAudioSource(inputDev, fmt, this);
-    audioSource->setBufferSize(640);
+    audioSource->setBufferSize(4096);
     audioInput = audioSource->start();
     int err;
     opusEncoder = opus_encoder_create(16000, 1, OPUS_APPLICATION_VOIP, &err);
@@ -428,17 +428,31 @@ void VoiceChat::onUdpReadyRead()
 
         if (idx != -1) {
             PeerInfo& peer = peers[idx];
+            qDebug() << "UDP received"
+                     << data.size()
+                     << senderIp
+                     << senderPort;
             if (!peer.connected) markPeerConnected(idx);
             if (peer.output && opusDecoder) {
-                QByteArray pcmOut(OPUS_FRAME_SIZE * 2, '\0');
+                QByteArray pcmOut(OPUS_FRAME_SIZE * sizeof(opus_int16), '\0');
                 int samples = opus_decode(
                     opusDecoder,
-                    reinterpret_cast<const uchar*>(data.constData()),
+                    reinterpret_cast<const unsigned char*>(data.constData()),
                     data.size(),
                     reinterpret_cast<opus_int16*>(pcmOut.data()),
                     OPUS_FRAME_SIZE,
-                    0
-                    );
+                    0);
+
+                if (samples < 0)
+                {
+                    qDebug() << "opus_decode error:"
+                             << opus_strerror(samples);
+                    continue;
+                }
+
+                qDebug() << "decoded =" << samples;
+
+                qDebug() << "decoded samples =" << samples;
                 if (samples > 0)
                     peer.output->write(pcmOut.left(samples * 2));
             }
@@ -448,34 +462,49 @@ void VoiceChat::onUdpReadyRead()
 
 void VoiceChat::onAudioInputReady()
 {
-    QByteArray pcm = audioInput->readAll();
-    if (pcm.isEmpty() || !opusEncoder) return;
+    if (!audioInput || !opusEncoder)
+        return;
 
-    int totalSamples = pcm.size() / 2;
-    int offset = 0;
+    captureBuffer.append(audioInput->readAll());
 
-    while (offset + OPUS_FRAME_SIZE * 2 <= pcm.size()) {
+    while (captureBuffer.size() >= OPUS_FRAME_SIZE * 2)
+    {
         const opus_int16* pcmData =
-            reinterpret_cast<const opus_int16*>(pcm.constData() + offset);
+            reinterpret_cast<const opus_int16*>(captureBuffer.constData());
 
         QByteArray encoded(4000, '\0');
+
         int encodedLen = opus_encode(
             opusEncoder,
             pcmData,
             OPUS_FRAME_SIZE,
-            reinterpret_cast<uchar*>(encoded.data()),
-            encoded.size()
-            );
+            reinterpret_cast<unsigned char*>(encoded.data()),
+            encoded.size());
 
-        if (encodedLen > 0) {
+        qDebug() << "encoded =" << encodedLen;
+
+        if (encodedLen > 0)
+        {
             encoded.resize(encodedLen);
+
             for (const PeerInfo& peer : std::as_const(peers))
+            {
                 if (peer.connected)
+                {
                     udpSocket->writeDatagram(
-                        encoded, QHostAddress(peer.ip), peer.port);
+                        encoded,
+                        QHostAddress(peer.ip),
+                        peer.port);
+                }
+            }
+        }
+        else
+        {
+            qDebug() << "opus_encode error:"
+                     << opus_strerror(encodedLen);
         }
 
-        offset += OPUS_FRAME_SIZE * 2;
+        captureBuffer.remove(0, OPUS_FRAME_SIZE * 2);
     }
 }
 
