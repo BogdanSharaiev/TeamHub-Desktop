@@ -33,7 +33,7 @@ CodeEditor::CodeEditor(QWidget* parent)
     setupEditor();
     setupAutoComplete();
     setupLinter();
-
+    textSearch = new TextSearch(this);
     connect(this, SIGNAL(textChanged()),                    this, SIGNAL(fileModified()));
     connect(this, SIGNAL(cursorPositionChanged(int,int)),   this, SLOT(onCursorChanged(int,int)));
     connect(this, SIGNAL(modificationChanged(bool)),        this, SLOT(onModified(bool)));

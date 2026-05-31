@@ -11,6 +11,8 @@
 #include <QProcess>
 #include <QTimer>
 
+#include "textsearch.h"
+
 class CodeEditor : public QsciScintilla
 {
     Q_OBJECT
@@ -74,6 +76,8 @@ private:
     int               zoomLevel;
     QProcess*         lintProcess;
     QTimer*           lintTimer;
+
+    TextSearch* textSearch;
 };
 
 #endif // CODEEDITOR_H

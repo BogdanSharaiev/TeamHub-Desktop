@@ -825,6 +825,64 @@ QPushButton#voipBtn:disabled { color: #555555; }
 /* ── Shared stub label ──────────────────────────────────────── */
 QLabel#stubLabel { color: #555555; font-size: 11px; }
 
+/* ── Search Widget ───────────────────────────────────────── */
+
+QWidget#textSearch {
+    background: #2d2d30;
+    border: 1px solid #3c3c3c;
+    border-radius: 6px;
+}
+
+QLineEdit#searchEdit {
+    background: #3c3c3c;
+    color: #d4d4d4;
+    border: 1px solid #505050;
+    border-radius: 3px;
+    padding: 5px 8px;
+    selection-background-color: #094771;
+}
+
+QLineEdit#searchEdit:focus {
+    border: 1px solid #007acc;
+}
+
+QPushButton#searchNavBtn {
+    background: transparent;
+    color: #cccccc;
+    border: none;
+    padding: 4px 8px;
+}
+
+QPushButton#searchNavBtn:hover {
+    background: #3c3c3c;
+    border-radius: 3px;
+}
+
+QPushButton#searchNavBtn:pressed {
+    background: #454545;
+}
+
+QPushButton#searchReplaceBtn {
+    background: #0e639c;
+    color: white;
+    border: none;
+    border-radius: 3px;
+    padding: 5px 12px;
+}
+
+QPushButton#searchReplaceBtn:hover {
+    background: #1177bb;
+}
+
+QPushButton#searchReplaceBtn:pressed {
+    background: #0b4f7c;
+}
+
+QPushButton#searchReplaceBtn:disabled {
+    background: #444444;
+    color: #888888;
+}
+
 /* ── Status Bar ─────────────────────────────────────────────── */
 QStatusBar {
     background: #007acc;

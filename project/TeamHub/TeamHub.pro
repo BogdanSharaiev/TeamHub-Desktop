@@ -13,6 +13,7 @@ win32 {
 
 SOURCES += \
     src/editor/codeeditor.cpp \
+    src/editor/textsearch.cpp \
     src/filebrowser/filebrowser.cpp \
     src/main.cpp \
     src/mainwindow.cpp \
@@ -25,6 +26,7 @@ HEADERS += \
     src/crdt/rganode.h \
     src/crdt/rgaseq.h \
     src/editor/codeeditor.h \
+    src/editor/textsearch.h \
     src/filebrowser/filebrowser.h \
     src/mainwindow.h \
     src/rga/rgamanager.h \
