@@ -3,15 +3,15 @@
 #include <Qsci/qscicommand.h>
 #include <Qsci/qscicommandset.h>
 
-#include <QFile>
-#include <QTextStream>
-#include <QFont>
 #include <QColor>
+#include <QFile>
+#include <QFont>
 #include <QKeyEvent>
 #include <QRegularExpression>
 #include <QTextCursor>
+#include <QTextStream>
 
-static const QList<QPair<QChar,QChar>> kAutoPairs = {
+static const QList<QPair<QChar, QChar>> kAutoPairs = {
     {'(', ')'},
     {'[', ']'},
     {'{', '}'},
@@ -19,7 +19,7 @@ static const QList<QPair<QChar,QChar>> kAutoPairs = {
     {'\'', '\''},
 };
 
-CodeEditor::CodeEditor(QWidget* parent)
+CodeEditor::CodeEditor(QWidget *parent)
     : QsciScintilla(parent)
     , lexer(nullptr)
     , theme(Theme::Dark)
@@ -34,9 +34,18 @@ CodeEditor::CodeEditor(QWidget* parent)
     setupAutoComplete();
     setupLinter();
     textSearch = new TextSearch(this);
-    connect(this, SIGNAL(textChanged()),                    this, SIGNAL(fileModified()));
-    connect(this, SIGNAL(cursorPositionChanged(int,int)),   this, SLOT(onCursorChanged(int,int)));
-    connect(this, SIGNAL(modificationChanged(bool)),        this, SLOT(onModified(bool)));
+    textSearch->hide();
+
+    connect(textSearch, &TextSearch::findNext, this, &CodeEditor::onFindNext);
+    connect(textSearch, &TextSearch::findPrev, this, &CodeEditor::onFindPrev);
+    connect(textSearch, &TextSearch::replaceOne, this, &CodeEditor::onReplaceOne);
+    connect(textSearch, &TextSearch::replaceAllText, this, &CodeEditor::onReplaceAll);
+    connect(textSearch, &TextSearch::closed, this, &CodeEditor::onSearchClosed);
+    connect(textSearch, &TextSearch::searchTextChanged, this, &CodeEditor::updateSearchHighlights);
+
+    connect(this, SIGNAL(textChanged()), this, SIGNAL(fileModified()));
+    connect(this, SIGNAL(cursorPositionChanged(int, int)), this, SLOT(onCursorChanged(int, int)));
+    connect(this, SIGNAL(modificationChanged(bool)), this, SLOT(onModified(bool)));
 }
 
 void CodeEditor::setupLexer()
@@ -107,40 +116,57 @@ void CodeEditor::setupEditor()
 
     SendScintilla(SCI_SETMULTIPLESELECTION, 1);
     SendScintilla(SCI_SETADDITIONALSELECTIONTYPING, 1);
-
-
 }
 
-void CodeEditor::onCursorChanged(int line, int index){
+void CodeEditor::onCursorChanged(int line, int index)
+{
     emit cursorPositionUpdated(line, index);
 }
 
-void CodeEditor::onModified(bool modified){
+void CodeEditor::onModified(bool modified)
+{
     emit modifyChanged(modified);
 }
 
-void CodeEditor::keyPressEvent(QKeyEvent* event)
+void CodeEditor::keyPressEvent(QKeyEvent *event)
 {
     if (applyingRemote) {
         QsciScintilla::keyPressEvent(event);
         return;
     }
 
-    if (handleBackspaceInPair(event)) return;
-    if (skipClosingChar(event))       return;
-    if (autoCloseChar(event))         return;
+    if (handleBackspaceInPair(event))
+        return;
+    if (skipClosingChar(event))
+        return;
+    if (autoCloseChar(event))
+        return;
 
     const Qt::KeyboardModifiers mod = event->modifiers();
     const int key = event->key();
 
     if (mod == Qt::ControlModifier) {
-        if (key == Qt::Key_S) {
-            if (!filePath.isEmpty()) saveFile(filePath);
+        if (mod == Qt::ControlModifier && key == Qt::Key_F) {
+            showSearch();
             return;
         }
-        if (key == Qt::Key_Plus || key == Qt::Key_Equal) { zoomIn();    return; }
-        if (key == Qt::Key_Minus)                        { zoomOut();   return; }
-        if (key == Qt::Key_0)                            { resetZoom(); return; }
+        if (key == Qt::Key_S) {
+            if (!filePath.isEmpty())
+                saveFile(filePath);
+            return;
+        }
+        if (key == Qt::Key_Plus || key == Qt::Key_Equal) {
+            zoomIn();
+            return;
+        }
+        if (key == Qt::Key_Minus) {
+            zoomOut();
+            return;
+        }
+        if (key == Qt::Key_0) {
+            resetZoom();
+            return;
+        }
     }
 
     if (mod == Qt::NoModifier || mod == Qt::ShiftModifier) {
@@ -187,16 +213,18 @@ void CodeEditor::keyPressEvent(QKeyEvent* event)
     QsciScintilla::keyPressEvent(event);
 }
 
-bool CodeEditor::autoCloseChar(QKeyEvent* event)
+bool CodeEditor::autoCloseChar(QKeyEvent *event)
 {
     if (event->modifiers() & ~Qt::ShiftModifier)
         return false;
 
     const QChar ch = event->text().isEmpty() ? QChar() : event->text().at(0);
-    if (ch.isNull()) return false;
+    if (ch.isNull())
+        return false;
 
-    for (const auto& [open, close] : kAutoPairs) {
-        if (ch != open) continue;
+    for (const auto &[open, close] : kAutoPairs) {
+        if (ch != open)
+            continue;
 
         if (open == close) {
             int line, col;
@@ -222,16 +250,18 @@ bool CodeEditor::autoCloseChar(QKeyEvent* event)
     return false;
 }
 
-bool CodeEditor::skipClosingChar(QKeyEvent* event)
+bool CodeEditor::skipClosingChar(QKeyEvent *event)
 {
     if (event->modifiers() != Qt::NoModifier)
         return false;
 
     const QChar ch = event->text().isEmpty() ? QChar() : event->text().at(0);
-    if (ch.isNull()) return false;
+    if (ch.isNull())
+        return false;
 
-    for (const auto& [open, close] : kAutoPairs) {
-        if (ch != close || open == close) continue;
+    for (const auto &[open, close] : kAutoPairs) {
+        if (ch != close || open == close)
+            continue;
 
         int line, col;
         getCursorPosition(&line, &col);
@@ -244,7 +274,7 @@ bool CodeEditor::skipClosingChar(QKeyEvent* event)
     return false;
 }
 
-bool CodeEditor::handleBackspaceInPair(QKeyEvent* event)
+bool CodeEditor::handleBackspaceInPair(QKeyEvent *event)
 {
     if (event->key() != Qt::Key_Backspace || event->modifiers() != Qt::NoModifier)
         return false;
@@ -253,13 +283,14 @@ bool CodeEditor::handleBackspaceInPair(QKeyEvent* event)
 
     int line, col;
     getCursorPosition(&line, &col);
-    if (col == 0) return false;
+    if (col == 0)
+        return false;
 
     const QString lineText = text(line);
     const QChar before = lineText.at(col - 1);
-    const QChar after  = col < lineText.length() ? lineText.at(col) : QChar();
+    const QChar after = col < lineText.length() ? lineText.at(col) : QChar();
 
-    for (const auto& [open, close] : kAutoPairs) {
+    for (const auto &[open, close] : kAutoPairs) {
         if (before == open && after == close) {
             int pos = SendScintilla(SCI_GETCURRENTPOS);
             setSelection(line, col - 1, line, col + 1);
@@ -274,29 +305,31 @@ bool CodeEditor::handleBackspaceInPair(QKeyEvent* event)
 
 void CodeEditor::setupAutoComplete()
 {
-    QsciAPIs* apis = new QsciAPIs(lexer);
+    QsciAPIs *apis = new QsciAPIs(lexer);
 
     const QStringList keywords = {
-        "False", "None", "True", "and", "as", "assert", "async", "await",
-        "break", "class", "continue", "def", "del", "elif", "else", "except",
-        "finally", "for", "from", "global", "if", "import", "in", "is",
-        "lambda", "nonlocal", "not", "or", "pass", "raise", "return",
-        "try", "while", "with", "yield",
-        "abs", "all", "any", "bool", "breakpoint", "callable", "chr",
-        "dict", "dir", "divmod", "enumerate", "eval", "exec", "filter",
-        "float", "format", "frozenset", "getattr", "globals", "hasattr",
-        "hash", "help", "hex", "id", "input", "int", "isinstance",
-        "issubclass", "iter", "len", "list", "locals", "map", "max",
-        "min", "next", "object", "oct", "open", "ord", "pow", "print",
-        "property", "range", "repr", "reversed", "round", "set", "setattr",
-        "slice", "sorted", "staticmethod", "str", "sum", "super", "tuple",
-        "type", "vars", "zip", "self", "cls",
-        "__init__", "__str__", "__repr__", "__len__", "__getitem__",
-        "__setitem__", "__contains__", "__iter__", "__next__",
-        "__enter__", "__exit__", "__call__", "__del__",
+        "False",        "None",       "True",         "and",        "as",          "assert",
+        "async",        "await",      "break",        "class",      "continue",    "def",
+        "del",          "elif",       "else",         "except",     "finally",     "for",
+        "from",         "global",     "if",           "import",     "in",          "is",
+        "lambda",       "nonlocal",   "not",          "or",         "pass",        "raise",
+        "return",       "try",        "while",        "with",       "yield",       "abs",
+        "all",          "any",        "bool",         "breakpoint", "callable",    "chr",
+        "dict",         "dir",        "divmod",       "enumerate",  "eval",        "exec",
+        "filter",       "float",      "format",       "frozenset",  "getattr",     "globals",
+        "hasattr",      "hash",       "help",         "hex",        "id",          "input",
+        "int",          "isinstance", "issubclass",   "iter",       "len",         "list",
+        "locals",       "map",        "max",          "min",        "next",        "object",
+        "oct",          "open",       "ord",          "pow",        "print",       "property",
+        "range",        "repr",       "reversed",     "round",      "set",         "setattr",
+        "slice",        "sorted",     "staticmethod", "str",        "sum",         "super",
+        "tuple",        "type",       "vars",         "zip",        "self",        "cls",
+        "__init__",     "__str__",    "__repr__",     "__len__",    "__getitem__", "__setitem__",
+        "__contains__", "__iter__",   "__next__",     "__enter__",  "__exit__",    "__call__",
+        "__del__",
     };
 
-    for (const auto& kw : keywords)
+    for (const auto &kw : keywords)
         apis->add(kw);
 
     apis->prepare();
@@ -310,18 +343,24 @@ void CodeEditor::setupAutoComplete()
     setCallTipsStyle(QsciScintilla::CallTipsNone);
 }
 
-
 void CodeEditor::setupLinter()
 {
     indicatorDefine(QsciScintilla::SquiggleIndicator, ErrorIndicator);
     setIndicatorForegroundColor(QColor("#f44747"), ErrorIndicator);
 
+    indicatorDefine(QsciScintilla::BoxIndicator, SEARCH_INDICATOR);
+    setIndicatorForegroundColor(QColor("#d7ba7d"), SEARCH_INDICATOR);
+    setIndicatorOutlineColor(QColor("#d7ba7d"), SEARCH_INDICATOR);
+
     lintTimer = new QTimer(this);
     lintTimer->setSingleShot(true);
     lintTimer->setInterval(800);
 
-    connect(lintTimer, &QTimer::timeout, this, &CodeEditor::checkSyntax);
-    connect(this, SIGNAL(textChanged()), lintTimer, SLOT(start()));
+    connect(lintTimer, &QTimer::timeout,
+            this, &CodeEditor::checkSyntax);
+
+    connect(this, SIGNAL(textChanged()),
+            lintTimer, SLOT(start()));
 }
 
 void CodeEditor::checkSyntax()
@@ -336,17 +375,17 @@ void CodeEditor::checkSyntax()
     lintProcess = new QProcess(this);
     connect(lintProcess,
             QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-            this, &CodeEditor::onLintFinished);
+            this,
+            &CodeEditor::onLintFinished);
 
-    lintProcess->start("python", {
-        "-c",
-        "import sys,ast\n"
-        "src=sys.stdin.buffer.read().decode('utf-8','replace')\n"
-        "try:\n"
-        "    ast.parse(src,'<editor>')\n"
-        "except SyntaxError as e:\n"
-        "    print(f'{e.lineno}|{e.offset or 0}|{e.msg}',file=sys.stderr)\n"
-    });
+    lintProcess->start("python",
+                       {"-c",
+                        "import sys,ast\n"
+                        "src=sys.stdin.buffer.read().decode('utf-8','replace')\n"
+                        "try:\n"
+                        "    ast.parse(src,'<editor>')\n"
+                        "except SyntaxError as e:\n"
+                        "    print(f'{e.lineno}|{e.offset or 0}|{e.msg}',file=sys.stderr)\n"});
 
     if (lintProcess->state() == QProcess::Running) {
         lintProcess->write(text().toUtf8());
@@ -356,26 +395,30 @@ void CodeEditor::checkSyntax()
 
 void CodeEditor::onLintFinished(int exitCode, QProcess::ExitStatus)
 {
-    if (exitCode == 0 || !lintProcess) return;
+    if (exitCode == 0 || !lintProcess)
+        return;
 
     const QString err = QString::fromUtf8(lintProcess->readAllStandardError()).trimmed();
-    if (err.isEmpty()) return;
+    if (err.isEmpty())
+        return;
 
     static const QRegularExpression re(R"(^(\d+)\|(\d+)\|(.+)$)");
     const auto match = re.match(err);
-    if (!match.hasMatch()) return;
+    if (!match.hasMatch())
+        return;
 
-    const int line   = match.captured(1).toInt() - 1;
-    const int col    = std::max(0, match.captured(2).toInt() - 1);
-    const int len    = std::max(1, lineLength(line) - col - 1);
+    const int line = match.captured(1).toInt() - 1;
+    const int col = std::max(0, match.captured(2).toInt() - 1);
+    const int len = std::max(1, lineLength(line) - col - 1);
 
     fillIndicatorRange(line, col, line, col + len, ErrorIndicator);
 }
 
-void CodeEditor::loadFile(const QString& filepath)
+void CodeEditor::loadFile(const QString &filepath)
 {
     QFile file(filepath);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return;
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+        return;
 
     QTextStream in(&file);
     in.setEncoding(QStringConverter::Utf8);
@@ -386,10 +429,11 @@ void CodeEditor::loadFile(const QString& filepath)
     setModified(false);
 }
 
-void CodeEditor::saveFile(const QString& filepath)
+void CodeEditor::saveFile(const QString &filepath)
 {
     QFile file(filepath);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return;
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
+        return;
 
     QTextStream out(&file);
     out.setEncoding(QStringConverter::Utf8);
@@ -401,20 +445,29 @@ void CodeEditor::saveFile(const QString& filepath)
     emit fileSaved();
 }
 
-void CodeEditor::setFilePath(const QString& filepath) { filePath = filepath; }
-QString CodeEditor::getFilePath() const               { return filePath; }
+void CodeEditor::setFilePath(const QString &filepath)
+{
+    filePath = filepath;
+}
+QString CodeEditor::getFilePath() const
+{
+    return filePath;
+}
 
 void CodeEditor::setTheme(Theme t)
 {
     theme = t;
-    if (theme == Theme::Dark) applyDarkTheme();
-    else                      applyLightTheme();
+    if (theme == Theme::Dark)
+        applyDarkTheme();
+    else
+        applyLightTheme();
     setupFonts();
 }
 
 void CodeEditor::applyDarkTheme()
 {
-    if (!lexer) return;
+    if (!lexer)
+        return;
 
     const QColor bg("#1e1e1e");
     const QColor fg("#d4d4d4");
@@ -424,7 +477,7 @@ void CodeEditor::applyDarkTheme()
     for (int s = 0; s <= QsciLexerPython::Inconsistent; ++s)
         lexer->setPaper(bg, s);
 
-    lexer->setColor(fg,                QsciLexerPython::Default);
+    lexer->setColor(fg, QsciLexerPython::Default);
     lexer->setColor(QColor("#569cd6"), QsciLexerPython::Keyword);
     lexer->setColor(QColor("#ce9178"), QsciLexerPython::SingleQuotedString);
     lexer->setColor(QColor("#ce9178"), QsciLexerPython::DoubleQuotedString);
@@ -436,8 +489,8 @@ void CodeEditor::applyDarkTheme()
     lexer->setColor(QColor("#b5cea8"), QsciLexerPython::Number);
     lexer->setColor(QColor("#dcdcaa"), QsciLexerPython::FunctionMethodName);
     lexer->setColor(QColor("#4ec9b0"), QsciLexerPython::ClassName);
-    lexer->setColor(fg,                QsciLexerPython::Operator);
-    lexer->setColor(fg,                QsciLexerPython::Identifier);
+    lexer->setColor(fg, QsciLexerPython::Operator);
+    lexer->setColor(fg, QsciLexerPython::Identifier);
     lexer->setColor(QColor("#c586c0"), QsciLexerPython::Decorator);
     lexer->setColor(QColor("#9cdcfe"), QsciLexerPython::HighlightedIdentifier);
 
@@ -458,7 +511,8 @@ void CodeEditor::applyDarkTheme()
 
 void CodeEditor::applyLightTheme()
 {
-    if (!lexer) return;
+    if (!lexer)
+        return;
 
     const QColor bg("#ffffff");
     const QColor fg("#000000");
@@ -468,7 +522,7 @@ void CodeEditor::applyLightTheme()
     for (int s = 0; s <= QsciLexerPython::Inconsistent; ++s)
         lexer->setPaper(bg, s);
 
-    lexer->setColor(fg,                QsciLexerPython::Default);
+    lexer->setColor(fg, QsciLexerPython::Default);
     lexer->setColor(QColor("#0000ff"), QsciLexerPython::Keyword);
     lexer->setColor(QColor("#a31515"), QsciLexerPython::SingleQuotedString);
     lexer->setColor(QColor("#a31515"), QsciLexerPython::DoubleQuotedString);
@@ -480,8 +534,8 @@ void CodeEditor::applyLightTheme()
     lexer->setColor(QColor("#098658"), QsciLexerPython::Number);
     lexer->setColor(QColor("#795e26"), QsciLexerPython::FunctionMethodName);
     lexer->setColor(QColor("#267f99"), QsciLexerPython::ClassName);
-    lexer->setColor(fg,                QsciLexerPython::Operator);
-    lexer->setColor(fg,                QsciLexerPython::Identifier);
+    lexer->setColor(fg, QsciLexerPython::Operator);
+    lexer->setColor(fg, QsciLexerPython::Identifier);
     lexer->setColor(QColor("#af00db"), QsciLexerPython::Decorator);
     lexer->setColor(QColor("#001080"), QsciLexerPython::HighlightedIdentifier);
 
@@ -514,7 +568,10 @@ int CodeEditor::currentColumn() const
     return col;
 }
 
-bool CodeEditor::isModified() const { return QsciScintilla::isModified(); }
+bool CodeEditor::isModified() const
+{
+    return QsciScintilla::isModified();
+}
 
 void CodeEditor::resetZoom()
 {
@@ -526,7 +583,8 @@ void CodeEditor::onCharAdded(int ch)
 {
     int pos = SendScintilla(SCI_GETCURRENTPOS);
 
-    if (ch == 0) return;
+    if (ch == 0)
+        return;
 
     QChar addedChar = QChar(ch);
 
@@ -535,7 +593,7 @@ void CodeEditor::onCharAdded(int ch)
     }
 }
 
-void CodeEditor::applyRemoteText(const QString& newText)
+void CodeEditor::applyRemoteText(const QString &newText)
 {
     applyingRemote = true;
     blockSignals(true);
@@ -555,4 +613,149 @@ void CodeEditor::applyRemoteText(const QString& newText)
 
     blockSignals(false);
     applyingRemote = false;
+}
+
+void CodeEditor::showSearch()
+{
+    repositionSearch();
+    textSearch->show();
+    textSearch->raise();
+    textSearch->focusFind();
+}
+
+void CodeEditor::hideSearch()
+{
+    textSearch->hide();
+    setFocus();
+    clearIndicatorRange(0, 0, lines(), 0, SEARCH_INDICATOR);
+    searchMatches.clear();
+}
+
+void CodeEditor::repositionSearch()
+{
+    const int margin = 8;
+    const int w = 520;
+    const int h = textSearch->sizeHint().height() + 10;
+    textSearch->setFixedWidth(w);
+    int x = width() - w - margin;
+    int y = height() - h - margin;
+    textSearch->setGeometry(x, y, w, h);
+}
+
+void CodeEditor::resizeEvent(QResizeEvent *event)
+{
+    QsciScintilla::resizeEvent(event);
+    if (textSearch->isVisible())
+        repositionSearch();
+}
+
+void CodeEditor::onSearchClosed()
+{
+    setFocus();
+    clearIndicatorRange(0, 0, lines(), 0, SEARCH_INDICATOR);
+    searchMatches.clear();
+}
+
+void CodeEditor::updateSearchHighlights(const QString &searchText)
+{
+    clearIndicatorRange(0, 0, lines(), 0, SEARCH_INDICATOR);
+
+    searchMatches.clear();
+
+    if (searchText.isEmpty())
+        return;
+
+    const QString src = text();
+
+    int pos = 0;
+
+    while ((pos = src.indexOf(searchText, pos, Qt::CaseInsensitive)) != -1) {
+        searchMatches.append(pos);
+        pos += searchText.length();
+    }
+
+    for (int p : searchMatches) {
+        int line, col;
+        lineIndexFromPosition(p, &line, &col);
+
+        int eline, ecol;
+        lineIndexFromPosition(p + searchText.length(), &eline, &ecol);
+
+        fillIndicatorRange(line, col, eline, ecol, SEARCH_INDICATOR);
+    }
+
+    searchCurrentIndex = -1;
+}
+
+void CodeEditor::onFindNext(const QString &searchText)
+{
+    if (searchText.isEmpty())
+        return;
+
+    if (searchMatches.isEmpty())
+        updateSearchHighlights(searchText);
+
+    if (searchMatches.isEmpty())
+        return;
+
+    searchCurrentIndex = (searchCurrentIndex + 1) % searchMatches.size();
+
+    selectCurrentMatch(searchText);
+}
+
+void CodeEditor::onFindPrev(const QString &searchText)
+{
+    if (searchText.isEmpty())
+        return;
+
+    if (searchMatches.isEmpty())
+        updateSearchHighlights(searchText);
+
+    if (searchMatches.isEmpty())
+        return;
+
+    searchCurrentIndex = (searchCurrentIndex - 1 + searchMatches.size()) % searchMatches.size();
+
+    selectCurrentMatch(searchText);
+}
+
+void CodeEditor::onReplaceOne(const QString &findText, const QString &replaceText)
+{
+    if (findText.isEmpty())
+        return;
+    if (selectedText().compare(findText, Qt::CaseInsensitive) == 0)
+        replaceSelectedText(replaceText);
+    onFindNext(findText);
+}
+
+void CodeEditor::onReplaceAll(const QString &findText, const QString &replaceText)
+{
+    if (findText.isEmpty())
+        return;
+    QString src = text();
+    src.replace(findText, replaceText, Qt::CaseInsensitive);
+    setText(src);
+    clearIndicatorRange(0, 0, lines(), 0, SEARCH_INDICATOR);
+    searchMatches.clear();
+}
+
+void CodeEditor::selectCurrentMatch(const QString& searchText)
+{
+    if (searchMatches.isEmpty())
+        return;
+
+    int pos = searchMatches[searchCurrentIndex];
+
+    int line, col;
+    lineIndexFromPosition(pos, &line, &col);
+
+    int eline, ecol;
+    lineIndexFromPosition(pos + searchText.length(), &eline, &ecol);
+
+    setSelection(line, col, eline, ecol);
+
+    ensureLineVisible(line);
+
+    textSearch->updateMatchLabel(searchCurrentIndex + 1,
+                                 searchMatches.size());
 }

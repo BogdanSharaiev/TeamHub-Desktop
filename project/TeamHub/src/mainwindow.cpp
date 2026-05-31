@@ -31,48 +31,40 @@ MainWindow::MainWindow(QWidget *parent)
 
     setSidePanelPage(0);
     btnFiles->setChecked(true);
-    connect(editorTabs, &QTabWidget::currentChanged,
-            this, &MainWindow::onTabChanged);
-    connect(editor, &CodeEditor::cursorPositionUpdated,
-            this, &MainWindow::onCursorPositionUpdated);
-    connect(editor, &CodeEditor::modifyChanged,
-            this, &MainWindow::onModificationChanged);
+    connect(editorTabs, &QTabWidget::currentChanged, this, &MainWindow::onTabChanged);
+    connect(editor, &CodeEditor::cursorPositionUpdated, this, &MainWindow::onCursorPositionUpdated);
+    connect(editor, &CodeEditor::modifyChanged, this, &MainWindow::onModificationChanged);
 
     outputPane->appendPlainText("[TeamHub] Ready.");
     updateWindowTitle();
 
-    rgamanager = new RGAManager(time(nullptr) ,this);
-    connect(rgamanager, &RGAManager::remoteTextChanged,
-            this, [this](const QString& text)
-            {
-                CodeEditor* ed = qobject_cast<CodeEditor*>(editorTabs->currentWidget());
-                if (!ed) return;
+    rgamanager = new RGAManager(time(nullptr), this);
+    connect(rgamanager, &RGAManager::remoteTextChanged, this, [this](const QString &text) {
+        CodeEditor *ed = qobject_cast<CodeEditor *>(editorTabs->currentWidget());
+        if (!ed)
+            return;
 
-                ed->applyRemoteText(text);
-            });
+        ed->applyRemoteText(text);
+    });
 
-    connect(rgamanager, &RGAManager::onInitReceived,
-            this, [this](const QString& text, const QString& filename)
-            {
+    connect(rgamanager,
+            &RGAManager::onInitReceived,
+            this,
+            [this](const QString &text, const QString &filename) {
                 auto ed = createTab(filename);
                 ed->applyRemoteText(text);
                 editorTabs->setCurrentWidget(ed);
 
-                connect(ed, &CodeEditor::localInsert,
-                        rgamanager, &RGAManager::localInsert);
-                connect(ed, &CodeEditor::localDelete,
-                        rgamanager, &RGAManager::localRemove);
+                connect(ed, &CodeEditor::localInsert, rgamanager, &RGAManager::localInsert);
+                connect(ed, &CodeEditor::localDelete, rgamanager, &RGAManager::localRemove);
                 outputPane->appendPlainText("[TeamHub] Snapshot received: " + filename);
             });
 
     voiceChat = new VoiceChat(this);
 
-    connect(voiceChat, &VoiceChat::statusChanged,
-            this, &MainWindow::onVoipStatusChanged);
-    connect(voiceChat, &VoiceChat::peerConnected,
-            this, &MainWindow::onVoipPeerConnected);
-    connect(voiceChat, &VoiceChat::peerDisconnected,
-            this, &MainWindow::onVoipPeerDisconnected);
+    connect(voiceChat, &VoiceChat::statusChanged, this, &MainWindow::onVoipStatusChanged);
+    connect(voiceChat, &VoiceChat::peerConnected, this, &MainWindow::onVoipPeerConnected);
+    connect(voiceChat, &VoiceChat::peerDisconnected, this, &MainWindow::onVoipPeerDisconnected);
     connect(voiceChat, &VoiceChat::connectedToServer, this, [this]() {
         voipConnectBtn->setText("Disconnect");
         voipCallBtn->setEnabled(true);
@@ -87,7 +79,7 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow() = default;
 
-void MainWindow::onVoipStatusChanged(const QString& status)
+void MainWindow::onVoipStatusChanged(const QString &status)
 {
     voipStatusLabel->setText(status);
     outputPane->appendPlainText("[VoIP] " + status);
@@ -104,47 +96,47 @@ void MainWindow::onVoipCallClicked()
     }
 }
 
-void MainWindow::onVoipPeerConnected(const QString& ip, quint16 port)
+void MainWindow::onVoipPeerConnected(const QString &ip, quint16 port)
 {
-    voipPeersLabel->setText(
-        QString("Peer: %1:%2 ✓").arg(ip).arg(port));
-    outputPane->appendPlainText(
-        QString("[VoIP] P2P link up: %1:%2").arg(ip).arg(port));
+    voipPeersLabel->setText(QString("Peer: %1:%2 ✓").arg(ip).arg(port));
+    outputPane->appendPlainText(QString("[VoIP] P2P link up: %1:%2").arg(ip).arg(port));
 }
 
-void MainWindow::onVoipPeerDisconnected(const QString& ip, quint16 port)
+void MainWindow::onVoipPeerDisconnected(const QString &ip, quint16 port)
 {
     voipPeersLabel->setText("Peers: none");
-    outputPane->appendPlainText(
-        QString("[VoIP] Peer left: %1:%2").arg(ip).arg(port));
+    outputPane->appendPlainText(QString("[VoIP] Peer left: %1:%2").arg(ip).arg(port));
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
     if (editor->isModified()) {
-        const auto btn = QMessageBox::question(
-            this, "Unsaved Changes",
-            "The current file has unsaved changes.\nSave before closing?",
-            QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
-            QMessageBox::Save);
+        const auto btn
+            = QMessageBox::question(this,
+                                    "Unsaved Changes",
+                                    "The current file has unsaved changes.\nSave before closing?",
+                                    QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
+                                    QMessageBox::Save);
 
         if (btn == QMessageBox::Save) {
-            if (!saveFile()) { event->ignore(); return; }
+            if (!saveFile()) {
+                event->ignore();
+                return;
+            }
         } else if (btn == QMessageBox::Cancel) {
-            event->ignore(); return;
+            event->ignore();
+            return;
         }
     }
     event->accept();
 }
 
-CodeEditor* MainWindow::createTab(const QString& name)
+CodeEditor *MainWindow::createTab(const QString &name)
 {
-    CodeEditor* ed = new CodeEditor(editorTabs);
-    connect(ed, &CodeEditor::cursorPositionUpdated,
-            this, &MainWindow::onCursorPositionUpdated);
+    CodeEditor *ed = new CodeEditor(editorTabs);
+    connect(ed, &CodeEditor::cursorPositionUpdated, this, &MainWindow::onCursorPositionUpdated);
 
-    connect(ed, &CodeEditor::modifyChanged,
-            this, &MainWindow::onModificationChanged);
+    connect(ed, &CodeEditor::modifyChanged, this, &MainWindow::onModificationChanged);
 
     editorTabs->addTab(ed, name);
     return ed;
@@ -153,61 +145,76 @@ CodeEditor* MainWindow::createTab(const QString& name)
 void MainWindow::setupMenuBar()
 {
     QMenu *fileMenu = menuBar()->addMenu("&File");
-    fileMenu->addAction("&New File",     this, &MainWindow::newFile,         QKeySequence::New);
-    fileMenu->addAction("&Open Folder",  this, &MainWindow::openFolder);
-    fileMenu->addAction("&Open File...", this, &MainWindow::openFile,        QKeySequence::Open);
-    fileMenu->addAction("&Save",         this, [this]{ saveFile(); },        QKeySequence::Save);
-    fileMenu->addAction("Save &As...",   this, [this]{ saveFileAs(); },      QKeySequence::SaveAs);
+    fileMenu->addAction("&New File", this, &MainWindow::newFile, QKeySequence::New);
+    fileMenu->addAction("&Open Folder", this, &MainWindow::openFolder);
+    fileMenu->addAction("&Open File...", this, &MainWindow::openFile, QKeySequence::Open);
+    fileMenu->addAction("&Save", this, [this] { saveFile(); }, QKeySequence::Save);
+    fileMenu->addAction("Save &As...", this, [this] { saveFileAs(); }, QKeySequence::SaveAs);
     fileMenu->addSeparator();
-    fileMenu->addAction("Close &Tab",    this,
-        [this]{ onTabCloseRequested(editorTabs->currentIndex()); },
+    fileMenu->addAction(
+        "Close &Tab",
+        this,
+        [this] { onTabCloseRequested(editorTabs->currentIndex()); },
         QKeySequence("Ctrl+W"));
     fileMenu->addSeparator();
-    fileMenu->addAction("E&xit", qApp, &QApplication::quit,                  QKeySequence::Quit);
+    fileMenu->addAction("E&xit", qApp, &QApplication::quit, QKeySequence::Quit);
 
     QMenu *editMenu = menuBar()->addMenu("&Edit");
-    editMenu->addAction("&Undo",       this, [this]{ editor->undo(); },      QKeySequence::Undo);
-    editMenu->addAction("&Redo",       this, [this]{ editor->redo(); },      QKeySequence::Redo);
+    editMenu->addAction("&Undo", this, [this] { editor->undo(); }, QKeySequence::Undo);
+    editMenu->addAction("&Redo", this, [this] { editor->redo(); }, QKeySequence::Redo);
     editMenu->addSeparator();
-    editMenu->addAction("Cu&t",        this, [this]{ editor->cut(); },       QKeySequence::Cut);
-    editMenu->addAction("&Copy",       this, [this]{ editor->copy(); },      QKeySequence::Copy);
-    editMenu->addAction("&Paste",      this, [this]{ editor->paste(); },     QKeySequence::Paste);
-    editMenu->addAction("Select &All", this, [this]{ editor->selectAll(); }, QKeySequence::SelectAll);
+    editMenu->addAction("Cu&t", this, [this] { editor->cut(); }, QKeySequence::Cut);
+    editMenu->addAction("&Copy", this, [this] { editor->copy(); }, QKeySequence::Copy);
+    editMenu->addAction("&Paste", this, [this] { editor->paste(); }, QKeySequence::Paste);
+    editMenu
+        ->addAction("Select &All", this, [this] { editor->selectAll(); }, QKeySequence::SelectAll);
     editMenu->addSeparator();
-    auto *actFind = editMenu->addAction("&Find / Replace...", QKeySequence("Ctrl+H"));
-    actFind->setEnabled(false);
-    auto *actGoto = editMenu->addAction("&Go to Line...",     QKeySequence("Ctrl+G"));
+    auto *actFind = editMenu->addAction("&Find / Replace...", QKeySequence("Ctrl+F"));
+    connect(actFind, &QAction::triggered, this, [this]() {
+        CodeEditor* ed = qobject_cast<CodeEditor*>(editorTabs->currentWidget());
+        if (ed) ed->showSearch();
+    });
+    auto *actGoto = editMenu->addAction("&Go to Line...", QKeySequence("Ctrl+G"));
     actGoto->setEnabled(false);
 
     QMenu *viewMenu = menuBar()->addMenu("&View");
-    viewMenu->addAction("Toggle &Side Panel",   this, &MainWindow::toggleSidePanel,  QKeySequence("Ctrl+B"));
-    viewMenu->addAction("Toggle &Output Panel", this, &MainWindow::toggleBottomDock, QKeySequence("Ctrl+J"));
-    viewMenu->addAction("Toggle &VoIP Panel",   this, &MainWindow::toggleVoipDock);
+    viewMenu->addAction("Toggle &Side Panel",
+                        this,
+                        &MainWindow::toggleSidePanel,
+                        QKeySequence("Ctrl+B"));
+    viewMenu->addAction("Toggle &Output Panel",
+                        this,
+                        &MainWindow::toggleBottomDock,
+                        QKeySequence("Ctrl+J"));
+    viewMenu->addAction("Toggle &VoIP Panel", this, &MainWindow::toggleVoipDock);
     viewMenu->addSeparator();
-    viewMenu->addAction("Zoom &In",     this, [this]{ editor->zoomIn(); },    QKeySequence::ZoomIn);
-    viewMenu->addAction("Zoom &Out",    this, [this]{ editor->zoomOut(); },   QKeySequence::ZoomOut);
-    viewMenu->addAction("Reset &Zoom",  this, [this]{ editor->resetZoom(); }, QKeySequence("Ctrl+0"));
+    viewMenu->addAction("Zoom &In", this, [this] { editor->zoomIn(); }, QKeySequence::ZoomIn);
+    viewMenu->addAction("Zoom &Out", this, [this] { editor->zoomOut(); }, QKeySequence::ZoomOut);
+    viewMenu->addAction("Reset &Zoom", this, [this] { editor->resetZoom(); }, QKeySequence("Ctrl+0"));
     viewMenu->addSeparator();
     QMenu *themeMenu = viewMenu->addMenu("&Theme");
-    themeMenu->addAction("Dark",  this, [this]{ editor->setTheme(CodeEditor::Theme::Dark); });
-    themeMenu->addAction("Light", this, [this]{ editor->setTheme(CodeEditor::Theme::Light); });
+    themeMenu->addAction("Dark", this, [this] { editor->setTheme(CodeEditor::Theme::Dark); });
+    themeMenu->addAction("Light", this, [this] { editor->setTheme(CodeEditor::Theme::Light); });
 
     QMenu *gitMenu = menuBar()->addMenu("&Git");
     for (auto *a : {
-            gitMenu->addAction("Init Repository"),
-            gitMenu->addAction("Clone..."),
-    }) a->setEnabled(false);
+             gitMenu->addAction("Init Repository"),
+             gitMenu->addAction("Clone..."),
+         })
+        a->setEnabled(false);
     gitMenu->addSeparator();
     for (auto *a : {
-            gitMenu->addAction("Pull"),
-            gitMenu->addAction("Push"),
-            gitMenu->addAction("Commit..."),
-    }) a->setEnabled(false);
+             gitMenu->addAction("Pull"),
+             gitMenu->addAction("Push"),
+             gitMenu->addAction("Commit..."),
+         })
+        a->setEnabled(false);
     gitMenu->addSeparator();
     for (auto *a : {
-            gitMenu->addAction("Branches"),
-            gitMenu->addAction("Diff"),
-    }) a->setEnabled(false);
+             gitMenu->addAction("Branches"),
+             gitMenu->addAction("Diff"),
+         })
+        a->setEnabled(false);
 
     QMenu *teamMenu = menuBar()->addMenu("&Team");
     teamMenu->addAction("Connect to Server", this, &MainWindow::joinCollab);
@@ -217,16 +224,15 @@ void MainWindow::setupMenuBar()
     teamMenu->addAction("Voice Call", this, &MainWindow::toggleVoipDock);
 }
 
-
 void MainWindow::setupMainToolBar()
 {
     auto *tb = addToolBar("Main");
     tb->setObjectName("mainToolBar");
     tb->setMovable(false);
 
-    tb->addAction("New",  this, &MainWindow::newFile);
+    tb->addAction("New", this, &MainWindow::newFile);
     tb->addAction("Open", this, &MainWindow::openFile);
-    tb->addAction("Save", this, [this]{ saveFile(); });
+    tb->addAction("Save", this, [this] { saveFile(); });
     tb->addSeparator();
 
     auto *actRun = tb->addAction("Run", this, &MainWindow::runFile);
@@ -245,11 +251,14 @@ void MainWindow::setupMainToolBar()
     connect(actCollab, &QAction::triggered, this, [this](bool checked) {
         if (checked) {
             bool ok;
-            QString room = QInputDialog::getText(
-                this, "Join Collaboration",
-                "Enter room name:", QLineEdit::Normal, "", &ok);
+            QString room = QInputDialog::getText(this,
+                                                 "Join Collaboration",
+                                                 "Enter room name:",
+                                                 QLineEdit::Normal,
+                                                 "",
+                                                 &ok);
             if (!ok || room.isEmpty()) {
-                qobject_cast<QAction*>(sender())->setChecked(false);
+                qobject_cast<QAction *>(sender())->setChecked(false);
                 return;
             }
             startCollab(room);
@@ -263,40 +272,46 @@ void MainWindow::setupMainToolBar()
     connect(actCall, &QAction::triggered, this, &MainWindow::toggleVoipDock);
 }
 
-void MainWindow::startCollab(const QString& room)
+void MainWindow::startCollab(const QString &room)
 {
-    CodeEditor* activeEditor = qobject_cast<CodeEditor*>(
-        editorTabs->currentWidget());
-    if (!activeEditor) return;
+    CodeEditor *activeEditor = qobject_cast<CodeEditor *>(editorTabs->currentWidget());
+    if (!activeEditor)
+        return;
 
-    QString url  = QString("ws://localhost:8765/%1").arg(room);
+    QString url = QString("ws://localhost:8765/%1").arg(room);
     QString text = activeEditor->text();
     QString path = activeEditor->getFilePath();
 
     rgamanager->disconnectFromServer();
     rgamanager->connectToServer(url);
 
-    connect(activeEditor, &CodeEditor::localInsert,
-            rgamanager, &RGAManager::localInsert);
-    connect(activeEditor, &CodeEditor::localDelete,
-            rgamanager, &RGAManager::localRemove);
+    connect(activeEditor, &CodeEditor::localInsert, rgamanager, &RGAManager::localInsert);
+    connect(activeEditor, &CodeEditor::localDelete, rgamanager, &RGAManager::localRemove);
 
-    connect(rgamanager, &RGAManager::connected, this,
-            [this, text, path]() {
-                rgamanager->buildFromText(text);
-                rgamanager->sendInitText(text, path);
-                outputPane->appendPlainText("[TeamHub] Collab started");
-            }, Qt::SingleShotConnection);
+    connect(
+        rgamanager,
+        &RGAManager::connected,
+        this,
+        [this, text, path]() {
+            rgamanager->buildFromText(text);
+            rgamanager->sendInitText(text, path);
+            outputPane->appendPlainText("[TeamHub] Collab started");
+        },
+        Qt::SingleShotConnection);
 }
 
 void MainWindow::joinCollab()
 {
     bool ok;
-    QString room = QInputDialog::getText(
-        this, "Join Collaboration",
-        "Enter room name:", QLineEdit::Normal, "", &ok);
+    QString room = QInputDialog::getText(this,
+                                         "Join Collaboration",
+                                         "Enter room name:",
+                                         QLineEdit::Normal,
+                                         "",
+                                         &ok);
 
-    if (!ok || room.isEmpty()) return;
+    if (!ok || room.isEmpty())
+        return;
 
     QString url = QString("ws://localhost:8765/%1").arg(room);
     rgamanager->disconnectFromServer();
@@ -308,12 +323,10 @@ void MainWindow::joinCollab()
 
 void MainWindow::stopCollab()
 {
-    CodeEditor* activeEditor = qobject_cast<CodeEditor*>(editorTabs->currentWidget());
+    CodeEditor *activeEditor = qobject_cast<CodeEditor *>(editorTabs->currentWidget());
     if (activeEditor) {
-        disconnect(activeEditor, &CodeEditor::localInsert,
-                   rgamanager, &RGAManager::localInsert);
-        disconnect(activeEditor, &CodeEditor::localDelete,
-                   rgamanager, &RGAManager::localRemove);
+        disconnect(activeEditor, &CodeEditor::localInsert, rgamanager, &RGAManager::localInsert);
+        disconnect(activeEditor, &CodeEditor::localDelete, rgamanager, &RGAManager::localRemove);
     }
     rgamanager->disconnectFromServer();
     outputPane->appendPlainText("[Collab] Session stopped.");
@@ -345,7 +358,6 @@ void MainWindow::setupCentralWidget()
     setCentralWidget(root);
 }
 
-
 void MainWindow::setupActivityBar()
 {
     activityBar = new QWidget;
@@ -368,7 +380,7 @@ void MainWindow::setupActivityBar()
 
     btnFiles = makeBtn("Files", "Explorer  (Ctrl+B)");
     btnTasks = makeBtn("Tasks", "Task Manager");
-    btnTeam  = makeBtn("Team",  "Team");
+    btnTeam = makeBtn("Team", "Team");
 
     vbox->addWidget(btnFiles);
     vbox->addWidget(btnTasks);
@@ -379,10 +391,10 @@ void MainWindow::setupActivityBar()
     btnVoip->setObjectName("activityBtnVoip");
     vbox->addWidget(btnVoip);
 
-    connect(btnFiles, &QToolButton::clicked, this, [this]{ onActivityButton(0); });
-    connect(btnTasks, &QToolButton::clicked, this, [this]{ onActivityButton(1); });
-    connect(btnTeam,  &QToolButton::clicked, this, [this]{ onActivityButton(2); });
-    connect(btnVoip,  &QToolButton::clicked, this, &MainWindow::toggleVoipDock);
+    connect(btnFiles, &QToolButton::clicked, this, [this] { onActivityButton(0); });
+    connect(btnTasks, &QToolButton::clicked, this, [this] { onActivityButton(1); });
+    connect(btnTeam, &QToolButton::clicked, this, [this] { onActivityButton(2); });
+    connect(btnVoip, &QToolButton::clicked, this, &MainWindow::toggleVoipDock);
 }
 
 void MainWindow::setupLeftPanel()
@@ -423,26 +435,26 @@ void MainWindow::setupLeftPanel()
 
     vbox->addWidget(leftStack, 1);
 
-    connect(fileBrowser, &FileBrowser::fileDoubleClicked,
-            this, &MainWindow::openFileFromBrowser);
+    connect(fileBrowser, &FileBrowser::fileDoubleClicked, this, &MainWindow::openFileFromBrowser);
 }
 
-void MainWindow::openFileFromBrowser(const QString& path)
+void MainWindow::openFileFromBrowser(const QString &path)
 {
     for (int i = 0; i < editorTabs->count(); i++) {
-        CodeEditor* existingEditor = qobject_cast<CodeEditor*>(editorTabs->widget(i));
+        CodeEditor *existingEditor = qobject_cast<CodeEditor *>(editorTabs->widget(i));
         if (existingEditor && existingEditor->getFilePath() == path) {
             editorTabs->setCurrentIndex(i);
             return;
         }
     }
 
-    CodeEditor* newEditor = new CodeEditor(editorTabs);
+    CodeEditor *newEditor = new CodeEditor(editorTabs);
     newEditor->loadFile(path);
-    connect(newEditor, &CodeEditor::cursorPositionUpdated,
-            this, &MainWindow::onCursorPositionUpdated);
-    connect(newEditor, &CodeEditor::modifyChanged,
-            this, &MainWindow::onModificationChanged);
+    connect(newEditor,
+            &CodeEditor::cursorPositionUpdated,
+            this,
+            &MainWindow::onCursorPositionUpdated);
+    connect(newEditor, &CodeEditor::modifyChanged, this, &MainWindow::onModificationChanged);
 
     const QString name = QFileInfo(path).fileName();
     int index = editorTabs->addTab(newEditor, name);
@@ -464,17 +476,14 @@ void MainWindow::setupEditorArea()
     editor = new CodeEditor(editorTabs);
     editorTabs->addTab(editor, "Untitled");
 
-    connect(editorTabs, &QTabWidget::tabCloseRequested,
-            this, &MainWindow::onTabCloseRequested);
+    connect(editorTabs, &QTabWidget::tabCloseRequested, this, &MainWindow::onTabCloseRequested);
 }
-
 
 void MainWindow::setupBottomDock()
 {
     bottomDock = new QDockWidget("Panel", this);
     bottomDock->setObjectName("bottomDock");
-    bottomDock->setFeatures(QDockWidget::DockWidgetClosable |
-                              QDockWidget::DockWidgetMovable);
+    bottomDock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable);
     bottomDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea);
     bottomDock->setTitleBarWidget(new QWidget);
 
@@ -496,10 +505,9 @@ void MainWindow::setupBottomDock()
     gitPane = new QWidget;
     gitPane->setObjectName("gitPane");
     {
-        auto *l   = new QVBoxLayout(gitPane);
-        auto *lbl = new QLabel(
-            "Git integration\n\n"
-            "Planned: staged / unstaged changes, commit history, inline diff.");
+        auto *l = new QVBoxLayout(gitPane);
+        auto *lbl = new QLabel("Git integration\n\n"
+                               "Planned: staged / unstaged changes, commit history, inline diff.");
         lbl->setAlignment(Qt::AlignCenter);
         lbl->setWordWrap(true);
         lbl->setObjectName("stubLabel");
@@ -516,14 +524,13 @@ void MainWindow::setupVoipDock()
 {
     voipDock = new QDockWidget("Voice", this);
     voipDock->setObjectName("voipDock");
-    voipDock->setFeatures(QDockWidget::DockWidgetClosable  |
-                          QDockWidget::DockWidgetMovable   |
-                          QDockWidget::DockWidgetFloatable);
+    voipDock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable
+                          | QDockWidget::DockWidgetFloatable);
     voipDock->setAllowedAreas(Qt::RightDockWidgetArea | Qt::LeftDockWidgetArea);
 
-    auto* panel = new QWidget;
+    auto *panel = new QWidget;
     panel->setObjectName("voipPanel");
-    auto* vbox = new QVBoxLayout(panel);
+    auto *vbox = new QVBoxLayout(panel);
     vbox->setContentsMargins(12, 12, 12, 12);
     vbox->setSpacing(8);
 
@@ -533,13 +540,13 @@ void MainWindow::setupVoipDock()
     voipStatusLabel->setObjectName("stubLabel");
     vbox->addWidget(voipStatusLabel);
 
-    auto* serverEdit = new QLineEdit("localhost");
+    auto *serverEdit = new QLineEdit("localhost");
     serverEdit->setObjectName("fileSearch");
     serverEdit->setPlaceholderText("Server host");
     serverEdit->setObjectName("voipServerEdit");
     vbox->addWidget(serverEdit);
 
-    auto* portEdit = new QLineEdit("9000");
+    auto *portEdit = new QLineEdit("9000");
     portEdit->setObjectName("fileSearch");
     portEdit->setPlaceholderText("Port");
     portEdit->setObjectName("voipPortEdit");
@@ -574,18 +581,18 @@ void MainWindow::setupVoipDock()
         } else {
             QString host = serverEdit->text().trimmed();
             quint16 port = portEdit->text().toUShort();
-            if (host.isEmpty() || port == 0) return;
+            if (host.isEmpty() || port == 0)
+                return;
             voiceChat->connectToServer(host, port);
         }
     });
 
-    connect(voipCallBtn, &QPushButton::clicked,
-            this, &MainWindow::onVoipCallClicked);
+    connect(voipCallBtn, &QPushButton::clicked, this, &MainWindow::onVoipCallClicked);
 }
 
 void MainWindow::setupStatusBar()
 {
-    statusFile     = new QLabel("Untitled");
+    statusFile = new QLabel("Untitled");
     statusPosition = new QLabel("Ln 1, Col 1");
     statusEncoding = new QLabel("UTF-8");
     statusLanguage = new QLabel("Python");
@@ -601,25 +608,25 @@ void MainWindow::setupStatusBar()
     statusBar()->addPermanentWidget(statusLanguage);
 }
 
-void MainWindow::onTabChanged(int index){
-    CodeEditor* activeEditor = qobject_cast<CodeEditor*>(
-        editorTabs->widget(index));
-    if(!activeEditor) return;
+void MainWindow::onTabChanged(int index)
+{
+    CodeEditor *activeEditor = qobject_cast<CodeEditor *>(editorTabs->widget(index));
+    if (!activeEditor)
+        return;
     editor = activeEditor;
     QString path = activeEditor->getFilePath();
     currentFilePath = path;
     QString filename;
-    if(path.isEmpty()){
+    if (path.isEmpty()) {
         filename = "Untitled";
         statusFile->setText(filename);
-    }else{
+    } else {
         filename = QFileInfo(path).fileName();
     }
     statusFile->setText(filename);
-    statusPosition->setText(
-        QString("Ln %1, Col %2")
-            .arg(activeEditor->currentLine() + 1)
-            .arg(activeEditor->currentColumn() + 1));
+    statusPosition->setText(QString("Ln %1, Col %2")
+                                .arg(activeEditor->currentLine() + 1)
+                                .arg(activeEditor->currentColumn() + 1));
     updateWindowTitle();
 }
 
@@ -919,10 +926,9 @@ void MainWindow::setSidePanelPage(int index)
 
 void MainWindow::updateWindowTitle()
 {
-    const QString name    = currentFilePath.isEmpty()
-                            ? "Untitled"
-                            : QFileInfo(currentFilePath).fileName();
-    const QString dirty   = editor->isModified() ? " \u25cf" : "";
+    const QString name = currentFilePath.isEmpty() ? "Untitled"
+                                                   : QFileInfo(currentFilePath).fileName();
+    const QString dirty = editor->isModified() ? " \u25cf" : "";
     setWindowTitle(name + dirty + " \u2014 TeamHub");
 }
 
@@ -933,15 +939,13 @@ void MainWindow::onActivityButton(int page)
 
 void MainWindow::onCursorPositionUpdated(int line, int index)
 {
-    statusPosition->setText(
-        QString("Ln %1, Col %2").arg(line + 1).arg(index + 1));
+    statusPosition->setText(QString("Ln %1, Col %2").arg(line + 1).arg(index + 1));
 }
 
 void MainWindow::onModificationChanged(bool modified)
 {
-    const QString name  = currentFilePath.isEmpty()
-                          ? "Untitled"
-                          : QFileInfo(currentFilePath).fileName();
+    const QString name = currentFilePath.isEmpty() ? "Untitled"
+                                                   : QFileInfo(currentFilePath).fileName();
     const QString dirty = modified ? " \u25cf" : "";
 
     setWindowTitle(name + dirty + " \u2014 TeamHub");
@@ -953,20 +957,24 @@ void MainWindow::onModificationChanged(bool modified)
 
 void MainWindow::onTabCloseRequested(int tabIndex)
 {
-    if (editorTabs->count() <= 1) return;
+    if (editorTabs->count() <= 1)
+        return;
 
-    CodeEditor* tabEditor = qobject_cast<CodeEditor*>(editorTabs->widget(tabIndex));
-    if (!tabEditor) return;
+    CodeEditor *tabEditor = qobject_cast<CodeEditor *>(editorTabs->widget(tabIndex));
+    if (!tabEditor)
+        return;
 
     if (tabEditor->isModified()) {
-        const auto btn = QMessageBox::question(
-            this, "Unsaved Changes",
-            "Save changes before closing this tab?",
-            QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
+        const auto btn = QMessageBox::question(this,
+                                               "Unsaved Changes",
+                                               "Save changes before closing this tab?",
+                                               QMessageBox::Save | QMessageBox::Discard
+                                                   | QMessageBox::Cancel);
 
         if (btn == QMessageBox::Save) {
             editor = tabEditor;
-            if (!saveFile()) return;
+            if (!saveFile())
+                return;
         } else if (btn == QMessageBox::Cancel) {
             return;
         }
@@ -977,9 +985,9 @@ void MainWindow::onTabCloseRequested(int tabIndex)
 
 void MainWindow::runFile()
 {
-    CodeEditor* currentEditor = qobject_cast<CodeEditor*>(
-        editorTabs->currentWidget());
-    if (!currentEditor) return;
+    CodeEditor *currentEditor = qobject_cast<CodeEditor *>(editorTabs->currentWidget());
+    if (!currentEditor)
+        return;
 
     QString path = currentEditor->getFilePath();
     if (path.isEmpty()) {
@@ -995,18 +1003,18 @@ void MainWindow::runFile()
     bottomTabs->setCurrentWidget(outputPane);
     bottomDock->setVisible(true);
 
-    QProcess* proc = new QProcess(this);
+    QProcess *proc = new QProcess(this);
     proc->setProcessChannelMode(QProcess::MergedChannels);
 
     connect(proc, &QProcess::readyReadStandardOutput, this, [this, proc]() {
-        outputPane->appendPlainText(
-            QString::fromLocal8Bit(proc->readAllStandardOutput()));
+        outputPane->appendPlainText(QString::fromLocal8Bit(proc->readAllStandardOutput()));
     });
 
-    connect(proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-            this, [this, proc](int code, QProcess::ExitStatus) {
-                outputPane->appendPlainText(
-                    QString("\n[TeamHub] Exit code: %1").arg(code));
+    connect(proc,
+            QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this,
+            [this, proc](int code, QProcess::ExitStatus) {
+                outputPane->appendPlainText(QString("\n[TeamHub] Exit code: %1").arg(code));
                 proc->deleteLater();
             });
 
@@ -1016,12 +1024,16 @@ void MainWindow::runFile()
 void MainWindow::newFile()
 {
     if (editor->isModified()) {
-        const auto btn = QMessageBox::question(
-            this, "Unsaved Changes",
-            "Save changes before creating a new file?",
-            QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
-        if (btn == QMessageBox::Save)        { if (!saveFile()) return; }
-        else if (btn == QMessageBox::Cancel) return;
+        const auto btn = QMessageBox::question(this,
+                                               "Unsaved Changes",
+                                               "Save changes before creating a new file?",
+                                               QMessageBox::Save | QMessageBox::Discard
+                                                   | QMessageBox::Cancel);
+        if (btn == QMessageBox::Save) {
+            if (!saveFile())
+                return;
+        } else if (btn == QMessageBox::Cancel)
+            return;
     }
 
     editor->clear();
@@ -1032,27 +1044,31 @@ void MainWindow::newFile()
     updateWindowTitle();
 }
 
-void MainWindow::clearTabs(){
-    while(editorTabs->count() > 0){
-       QWidget *w = editorTabs->widget(0);
-       editorTabs->removeTab(0);
-       delete w;
+void MainWindow::clearTabs()
+{
+    while (editorTabs->count() > 0) {
+        QWidget *w = editorTabs->widget(0);
+        editorTabs->removeTab(0);
+        delete w;
     }
 }
 
 void MainWindow::openFile()
 {
-    const QString path = QFileDialog::getOpenFileName(
-        this, "Open File", {},
-        "Python Files (*.py);;All Files (*)");
-    if (path.isEmpty()) return;
+    const QString path = QFileDialog::getOpenFileName(this,
+                                                      "Open File",
+                                                      {},
+                                                      "Python Files (*.py);;All Files (*)");
+    if (path.isEmpty())
+        return;
 
-    CodeEditor* newEditor = new CodeEditor(editorTabs);
+    CodeEditor *newEditor = new CodeEditor(editorTabs);
     newEditor->loadFile(path);
-    connect(newEditor, &CodeEditor::cursorPositionUpdated,
-            this, &MainWindow::onCursorPositionUpdated);
-    connect(newEditor, &CodeEditor::modifyChanged,
-            this, &MainWindow::onModificationChanged);
+    connect(newEditor,
+            &CodeEditor::cursorPositionUpdated,
+            this,
+            &MainWindow::onCursorPositionUpdated);
+    connect(newEditor, &CodeEditor::modifyChanged, this, &MainWindow::onModificationChanged);
 
     const QString name = QFileInfo(path).fileName();
     int index = editorTabs->addTab(newEditor, name);
@@ -1067,7 +1083,8 @@ void MainWindow::openFile()
 void MainWindow::openFolder()
 {
     const QString path = QFileDialog::getExistingDirectory(this, "Open Folder");
-    if (path.isEmpty()) return;
+    if (path.isEmpty())
+        return;
 
     fileBrowser->setRootPath(path);
     clearTabs();
@@ -1084,9 +1101,9 @@ void MainWindow::openFolder()
 
 bool MainWindow::saveFile()
 {
-    CodeEditor* activeEditor = qobject_cast<CodeEditor*>(
-        editorTabs->currentWidget());
-    if (!activeEditor) return false;
+    CodeEditor *activeEditor = qobject_cast<CodeEditor *>(editorTabs->currentWidget());
+    if (!activeEditor)
+        return false;
 
     QString path = activeEditor->getFilePath();
 
@@ -1106,10 +1123,12 @@ bool MainWindow::saveFile()
 
 bool MainWindow::saveFileAs()
 {
-    const QString path = QFileDialog::getSaveFileName(
-        this, "Save File As", {},
-        "Python Files (*.py);;All Files (*)");
-    if (path.isEmpty()) return false;
+    const QString path = QFileDialog::getSaveFileName(this,
+                                                      "Save File As",
+                                                      {},
+                                                      "Python Files (*.py);;All Files (*)");
+    if (path.isEmpty())
+        return false;
 
     currentFilePath = path;
     return saveFile();
@@ -1138,4 +1157,3 @@ void MainWindow::toggleVoipDock()
     voipDock->setVisible(!voipDock->isVisible());
     btnVoip->setChecked(voipDock->isVisible());
 }
-

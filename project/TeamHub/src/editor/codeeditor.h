@@ -1,15 +1,15 @@
 #ifndef CODEEDITOR_H
 #define CODEEDITOR_H
 
-#include <Qsci/qsciscintilla.h>
-#include <Qsci/qscilexerpython.h>
 #include <Qsci/qsciapis.h>
+#include <Qsci/qscilexerpython.h>
+#include <Qsci/qsciscintilla.h>
 
-#include <QWidget>
-#include <QString>
 #include <QKeyEvent>
 #include <QProcess>
+#include <QString>
 #include <QTimer>
+#include <QWidget>
 
 #include "textsearch.h"
 
@@ -20,20 +20,25 @@ class CodeEditor : public QsciScintilla
 public:
     enum class Theme { Dark, Light };
 
-    explicit CodeEditor(QWidget* parent = nullptr);
+    explicit CodeEditor(QWidget *parent = nullptr);
 
-    void loadFile(const QString& filepath);
-    void saveFile(const QString& filepath);
-    void setFilePath(const QString& filepath);
+    void loadFile(const QString &filepath);
+    void saveFile(const QString &filepath);
+    void setFilePath(const QString &filepath);
     QString getFilePath() const;
 
     void setTheme(Theme theme);
 
     bool isModified() const;
-    int  currentLine() const;
-    int  currentColumn() const;
-    void applyRemoteText(const QString& text);
+    int currentLine() const;
+    int currentColumn() const;
+    void applyRemoteText(const QString &text);
+
+    void showSearch();
+    void hideSearch();
+
     bool applyingRemote = false;
+
 public slots:
     void resetZoom();
     void onCursorChanged(int line, int index);
@@ -41,6 +46,13 @@ public slots:
     void applyLightTheme();
     void onModified(bool modified);
     void onCharAdded(int ch);
+
+    void onFindNext(const QString &text);
+    void onFindPrev(const QString &text);
+    void onReplaceOne(const QString &find, const QString &replace);
+    void onReplaceAll(const QString &find, const QString &replace);
+    void onSearchClosed();
+    void repositionSearch();
 
 signals:
     void fileModified();
@@ -51,7 +63,8 @@ signals:
     void localDelete(int position);
 
 protected:
-    void keyPressEvent(QKeyEvent* event) override;
+    void keyPressEvent(QKeyEvent *event) override;
+    void resizeEvent(QResizeEvent* event) override;
 
 private:
     void setupLexer();
@@ -61,23 +74,29 @@ private:
     void setupAutoComplete();
     void setupLinter();
 
-    bool autoCloseChar(QKeyEvent* event);
-    bool skipClosingChar(QKeyEvent* event);
-    bool handleBackspaceInPair(QKeyEvent* event);
+    bool autoCloseChar(QKeyEvent *event);
+    bool skipClosingChar(QKeyEvent *event);
+    bool handleBackspaceInPair(QKeyEvent *event);
 
     void checkSyntax();
     void onLintFinished(int exitCode, QProcess::ExitStatus);
 
     static constexpr int ErrorIndicator = 8;
+    static constexpr int SEARCH_INDICATOR = 9;
+    static constexpr int CURRENT_SEARCH_INDICATOR = 10;
 
-    QString           filePath;
-    QsciLexerPython*  lexer;
-    Theme             theme;
-    int               zoomLevel;
-    QProcess*         lintProcess;
-    QTimer*           lintTimer;
+    QString filePath;
+    QsciLexerPython *lexer;
+    Theme theme;
+    int zoomLevel;
+    QProcess *lintProcess;
+    QTimer *lintTimer;
 
-    TextSearch* textSearch;
+    TextSearch *textSearch;
+    void updateSearchHighlights(const QString& text);
+    void selectCurrentMatch(const QString& searchText);
+    int  searchCurrentIndex = 0;
+    QList<int> searchMatches;
 };
 
 #endif // CODEEDITOR_H

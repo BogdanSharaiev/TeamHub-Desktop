@@ -7,19 +7,18 @@
 #include <QListWidget>
 #include <QMainWindow>
 #include <QPlainTextEdit>
+#include <QPushButton>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QTabWidget>
 #include <QToolButton>
 #include <QTreeWidget>
-#include <QPushButton>
 
 #include "editor/codeeditor.h"
 #include "filebrowser/filebrowser.h"
-#include "terminal/terminal.h"
 #include "rga/rgamanager.h"
+#include "terminal/terminal.h"
 #include "voicechat/voicechat.h"
-
 
 class MainWindow : public QMainWindow
 {
@@ -34,32 +33,32 @@ protected:
 
 private:
     //Activity Bar
-    QWidget     *activityBar;
+    QWidget *activityBar;
     QToolButton *btnFiles;
     QToolButton *btnTasks;
     QToolButton *btnTeam;
     QToolButton *btnVoip;
     //Left Sidebar
-    QWidget        *leftPanel;
-    QLabel         *leftTitle;
+    QWidget *leftPanel;
+    QLabel *leftTitle;
     QStackedWidget *leftStack;
     FileBrowser *fileBrowser;
-    QListWidget    *taskList;
-    QListWidget    *teamList;
+    QListWidget *taskList;
+    QListWidget *teamList;
 
-    QSplitter  *centralSplitter;
+    QSplitter *centralSplitter;
 
     //Editor Area
     QTabWidget *editorTabs;
     CodeEditor *editor;
 
     //Bottom Dock
-    QDockWidget    *bottomDock;
-    QTabWidget     *bottomTabs;
+    QDockWidget *bottomDock;
+    QTabWidget *bottomTabs;
     QPlainTextEdit *outputPane;
     QPlainTextEdit *terminalPane;
     Terminal *terminal;
-    QWidget   *gitPane;
+    QWidget *gitPane;
     QDockWidget *voipDock;
 
     //Status Bar
@@ -69,19 +68,18 @@ private:
     QLabel *statusLanguage;
 
     //State
-    int     activeSidePanel;
+    int activeSidePanel;
     QString currentFilePath;
 
     // RGA Colab
-    RGAManager* rgamanager;
+    RGAManager *rgamanager;
 
     // Voice
-    VoiceChat* voiceChat;
-    QLabel*    voipStatusLabel;
-    QLabel*    voipPeersLabel;
-    QPushButton* voipConnectBtn;
-    QPushButton* voipCallBtn;
-
+    VoiceChat *voiceChat;
+    QLabel *voipStatusLabel;
+    QLabel *voipPeersLabel;
+    QPushButton *voipConnectBtn;
+    QPushButton *voipCallBtn;
 
     //Setup UI
     void setupMenuBar();
@@ -99,8 +97,7 @@ private:
     void updateWindowTitle();
 
     void clearTabs();
-    CodeEditor* createTab(const QString& name);
-
+    CodeEditor *createTab(const QString &name);
 
 private slots:
     void onActivityButton(int page);
@@ -108,7 +105,7 @@ private slots:
     void onModificationChanged(bool modified);
     void onTabCloseRequested(int tabIndex);
     void onTabChanged(int index);
-    void openFileFromBrowser(const QString& path);
+    void openFileFromBrowser(const QString &path);
 
     void newFile();
     void openFile();
@@ -121,14 +118,14 @@ private slots:
     void toggleBottomDock();
     void toggleVoipDock();
 
-    void startCollab(const QString& room);
+    void startCollab(const QString &room);
     void joinCollab();
     void stopCollab();
 
     void onVoipCallClicked();
-    void onVoipStatusChanged(const QString& status);
-    void onVoipPeerConnected(const QString& ip, quint16 port);
-    void onVoipPeerDisconnected(const QString& ip, quint16 port);
+    void onVoipStatusChanged(const QString &status);
+    void onVoipPeerConnected(const QString &ip, quint16 port);
+    void onVoipPeerDisconnected(const QString &ip, quint16 port);
 };
 
 #endif // MAINWINDOW_H
