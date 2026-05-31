@@ -55,7 +55,33 @@ VoiceChat::VoiceChat(QObject* parent)
     connect(stunTimer, &QTimer::timeout,
             this, &VoiceChat::onStunTimeout);
 
-    publicId = time(nullptr)%1000;
+    publicId = QRandomGenerator::global()->bounded(100000, 999999);
+
+    flushTimer = new QTimer(this);
+    flushTimer->setSingleShot(true);
+    flushTimer->setInterval(40);
+    connect(flushTimer, &QTimer::timeout, this, [this]() {
+        if (captureBuffer.isEmpty() || !opusEncoder) return;
+
+        int needed = OPUS_FRAME_SIZE * 2 - captureBuffer.size() % (OPUS_FRAME_SIZE * 2);
+        if (needed != OPUS_FRAME_SIZE * 2)
+            captureBuffer.append(QByteArray(needed, '\0'));
+
+        while (captureBuffer.size() >= OPUS_FRAME_SIZE * 2) {
+            const opus_int16* pcmData =
+                reinterpret_cast<const opus_int16*>(captureBuffer.constData());
+            QByteArray encoded(4000, '\0');
+            int len = opus_encode(opusEncoder, pcmData, OPUS_FRAME_SIZE,
+                                  reinterpret_cast<uchar*>(encoded.data()), 4000);
+            if (len > 0) {
+                encoded.resize(len);
+                for (const PeerInfo& peer : std::as_const(peers))
+                    if (peer.connected)
+                        udpSocket->writeDatagram(encoded, QHostAddress(peer.ip), peer.port);
+            }
+            captureBuffer.remove(0, OPUS_FRAME_SIZE * 2);
+        }
+    });
 }
 
 VoiceChat::~VoiceChat()
@@ -466,6 +492,7 @@ void VoiceChat::onAudioInputReady()
         return;
 
     captureBuffer.append(audioInput->readAll());
+    flushTimer->start();
 
     while (captureBuffer.size() >= OPUS_FRAME_SIZE * 2)
     {
