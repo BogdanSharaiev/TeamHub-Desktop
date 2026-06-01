@@ -10,6 +10,7 @@
 #include <QRegularExpression>
 #include <QTextCursor>
 #include <QTextStream>
+#include <QDir>
 
 static const QList<QPair<QChar, QChar>> kAutoPairs = {
     {'(', ')'},
@@ -365,53 +366,109 @@ void CodeEditor::setupLinter()
 
 void CodeEditor::checkSyntax()
 {
-    if (lintProcess && lintProcess->state() != QProcess::NotRunning) {
-        lintProcess->kill();
-        lintProcess->waitForFinished(200);
+    if (lintProcess) {
+        if (lintProcess->state() != QProcess::NotRunning) {
+            lintProcess->kill();
+            lintProcess->waitForFinished(300);
+        }
+        delete lintProcess;
+        lintProcess = nullptr;
     }
 
     clearIndicatorRange(0, 0, lines(), 0, ErrorIndicator);
 
+    QString tmpPath = QDir::tempPath() + "/teamhub_lint_tmp.py";
+    QFile tmpFile(tmpPath);
+    if (!tmpFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        qDebug() << "[Linter] Cannot write temp file:" << tmpPath;
+        return;
+    }
+    QTextStream stream(&tmpFile);
+    stream.setEncoding(QStringConverter::Utf8);
+    stream << text();
+    tmpFile.close();
+
     lintProcess = new QProcess(this);
+    lintProcess->setProcessChannelMode(QProcess::SeparateChannels);
+
     connect(lintProcess,
             QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-            this,
-            &CodeEditor::onLintFinished);
+            this, &CodeEditor::onLintFinished);
 
-    lintProcess->start("python",
-                       {"-c",
-                        "import sys,ast\n"
-                        "src=sys.stdin.buffer.read().decode('utf-8','replace')\n"
-                        "try:\n"
-                        "    ast.parse(src,'<editor>')\n"
-                        "except SyntaxError as e:\n"
-                        "    print(f'{e.lineno}|{e.offset or 0}|{e.msg}',file=sys.stderr)\n"});
+    qDebug() << "[Linter] Running pyflakes on:" << tmpPath;
+    lintProcess->start("python", {"-m", "pyflakes", tmpPath});
 
-    if (lintProcess->state() == QProcess::Running) {
-        lintProcess->write(text().toUtf8());
-        lintProcess->closeWriteChannel();
+    if (!lintProcess->waitForStarted(3000)) {
+        qDebug() << "[Linter] Failed to start:" << lintProcess->errorString();
+        delete lintProcess;
+        lintProcess = nullptr;
+        QFile::remove(tmpPath);
+        return;
     }
 }
 
-void CodeEditor::onLintFinished(int exitCode, QProcess::ExitStatus)
+void CodeEditor::onLintFinished(int exitCode, QProcess::ExitStatus status)
 {
-    if (exitCode == 0 || !lintProcess)
+    Q_UNUSED(status)
+    if (!lintProcess) return;
+
+    const QString out = QString::fromUtf8(
+                            lintProcess->readAllStandardOutput()).trimmed();
+    const QString err = QString::fromUtf8(
+                            lintProcess->readAllStandardError()).trimmed();
+
+    qDebug() << "[Linter] exitCode:" << exitCode;
+    qDebug() << "[Linter] stdout:" << out;
+    qDebug() << "[Linter] stderr:" << err;
+
+    lintProcess->deleteLater();
+    lintProcess = nullptr;
+
+    QString tmpPath = QDir::tempPath() + "/teamhub_lint_tmp.py";
+    QFile::remove(tmpPath);
+
+    QString combined;
+    if (!out.isEmpty() && !err.isEmpty())
+        combined = out + "\n" + err;
+    else
+        combined = out.isEmpty() ? err : out;
+
+    if (combined.isEmpty()) {
+        qDebug() << "[Linter] No output";
         return;
+    }
 
-    const QString err = QString::fromUtf8(lintProcess->readAllStandardError()).trimmed();
-    if (err.isEmpty())
-        return;
+    static const QRegularExpression re(
+        R"([^:]+:(\d+):(\d+)[: ].+)");
 
-    static const QRegularExpression re(R"(^(\d+)\|(\d+)\|(.+)$)");
-    const auto match = re.match(err);
-    if (!match.hasMatch())
-        return;
+    int matchCount = 0;
+    for (const QString& rawLine : combined.split('\n')) {
+        const QString line = rawLine.trimmed();
+        if (line.isEmpty()) continue;
 
-    const int line = match.captured(1).toInt() - 1;
-    const int col = std::max(0, match.captured(2).toInt() - 1);
-    const int len = std::max(1, lineLength(line) - col - 1);
+        qDebug() << "[Linter] Checking:" << line;
 
-    fillIndicatorRange(line, col, line, col + len, ErrorIndicator);
+        const auto match = re.match(line);
+        if (!match.hasMatch()) {
+            qDebug() << "[Linter] No match:" << line;
+            continue;
+        }
+
+        const int ln  = match.captured(1).toInt() - 1;
+        const int col = std::max(0, match.captured(2).toInt() - 1);
+
+        if (ln < 0 || ln >= lines()) {
+            qDebug() << "[Linter] Out of range:" << ln;
+            continue;
+        }
+
+        const int len = std::max(1, lineLength(ln) - col - 1);
+        qDebug() << "[Linter] Highlight ln=" << ln << "col=" << col << "len=" << len;
+        fillIndicatorRange(ln, col, ln, col + len, ErrorIndicator);
+        matchCount++;
+    }
+
+    qDebug() << "[Linter] Total:" << matchCount;
 }
 
 void CodeEditor::loadFile(const QString &filepath)
