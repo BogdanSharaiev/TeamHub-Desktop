@@ -75,6 +75,8 @@ MainWindow::MainWindow(QWidget *parent)
         voipCallBtn->setText("Start Call");
         voipPeersLabel->setText("Peers: none");
     });
+    connect(voiceChat, &VoiceChat::peersUpdated,
+            this, &MainWindow::onVoipPeersUpdated);
 }
 
 MainWindow::~MainWindow() = default;
@@ -563,7 +565,18 @@ void MainWindow::setupVoipDock()
     vbox->addWidget(voipPeersLabel);
 
     vbox->addStretch(1);
+    voipRoomEdit = new QLineEdit("default");
+    voipRoomEdit->setPlaceholderText("Room name");
+    voipRoomEdit->setObjectName("voipServerEdit");
+    vbox->addWidget(voipRoomEdit);
 
+    voipJoinRoomBtn = new QPushButton("Join Room");
+    voipJoinRoomBtn->setObjectName("voipBtn");
+    vbox->addWidget(voipJoinRoomBtn);
+
+    voipUsersList = new QListWidget;
+    voipUsersList->setObjectName("teamList");
+    vbox->addWidget(voipUsersList);
     voipCallBtn = new QPushButton("Start Call");
     voipCallBtn->setObjectName("voipBtn");
     voipCallBtn->setEnabled(false);
@@ -572,6 +585,7 @@ void MainWindow::setupVoipDock()
     voipDock->setWidget(panel);
     addDockWidget(Qt::RightDockWidgetArea, voipDock);
     voipDock->hide();
+
 
     connect(voipConnectBtn, &QPushButton::clicked, this, [this, serverEdit, portEdit]() {
         if (voiceChat->isConnected()) {
@@ -588,6 +602,21 @@ void MainWindow::setupVoipDock()
     });
 
     connect(voipCallBtn, &QPushButton::clicked, this, &MainWindow::onVoipCallClicked);
+    connect(voipJoinRoomBtn, &QPushButton::clicked, this, [this, serverEdit, portEdit]() {
+        QString host = serverEdit->text().trimmed();
+        quint16 port = portEdit->text().toUShort();
+
+        QString room = voipRoomEdit->text().trimmed();
+        if (room.isEmpty())
+            room = "default";
+
+        voiceChat->disconnectFromServer();
+
+        voiceChat->setRoom(room);
+        voiceChat->connectToServer(host, port);
+
+        voipUsersList->clear();
+    });
 }
 
 void MainWindow::setupStatusBar()
@@ -1156,4 +1185,13 @@ void MainWindow::toggleVoipDock()
 {
     voipDock->setVisible(!voipDock->isVisible());
     btnVoip->setChecked(voipDock->isVisible());
+}
+
+void MainWindow::onVoipPeersUpdated(const QStringList &ids)
+{
+    voipUsersList->clear();
+
+    for (const QString &id : ids) {
+        voipUsersList->addItem("User ID: " + id);
+    }
 }

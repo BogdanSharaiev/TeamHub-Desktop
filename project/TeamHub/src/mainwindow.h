@@ -80,6 +80,9 @@ private:
     QLabel *voipPeersLabel;
     QPushButton *voipConnectBtn;
     QPushButton *voipCallBtn;
+    QLineEdit *voipRoomEdit;
+    QPushButton *voipJoinRoomBtn;
+    QListWidget *voipUsersList;
 
     //Setup UI
     void setupMenuBar();
@@ -126,6 +129,7 @@ private slots:
     void onVoipStatusChanged(const QString &status);
     void onVoipPeerConnected(const QString &ip, quint16 port);
     void onVoipPeerDisconnected(const QString &ip, quint16 port);
+    void onVoipPeersUpdated(const QStringList &ids);
 };
 
 #endif // MAINWINDOW_H

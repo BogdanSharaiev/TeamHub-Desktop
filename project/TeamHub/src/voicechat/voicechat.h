@@ -40,6 +40,7 @@ public:
     void stopCall();
     bool isCallActive() const;
     bool isConnected() const;
+    void setRoom(const QString &r);
 
 signals:
     void statusChanged(const QString &status);
@@ -47,6 +48,7 @@ signals:
     void peerDisconnected(const QString &ip, quint16 port);
     void connectedToServer();
     void disconnectedFromServer();
+    void peersUpdated(const QStringList &ids);
 
 private slots:
     void onUdpReadyRead();
@@ -65,6 +67,8 @@ private:
     void markPeerConnected(int index);
     void createPeerSink(PeerInfo &peer);
     void destroyPeerSink(PeerInfo &peer);
+
+    void setMode(const QString &m);
 
     static QAudioFormat audioFormat();
 
@@ -91,6 +95,9 @@ private:
     QByteArray captureBuffer;
     static constexpr int OPUS_FRAME_SIZE = 320;
     QTimer* flushTimer;
+
+    QString room = "default";
+    QString mode = "hybrid"; // relay / hybrid / p2p
 
 };
 

@@ -638,7 +638,7 @@ void CodeEditor::repositionSearch()
     const int h = textSearch->sizeHint().height() + 10;
     textSearch->setFixedWidth(w);
     int x = width() - w - margin;
-    int y = height() - h - margin;
+    int y = margin;
     textSearch->setGeometry(x, y, w, h);
 }
 

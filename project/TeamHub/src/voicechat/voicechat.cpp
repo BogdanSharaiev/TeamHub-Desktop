@@ -297,10 +297,14 @@ void VoiceChat::onWebSocketTextMessageReceived(const QString& message)
 void VoiceChat::registerWithServer()
 {
     QJsonObject msg;
+
     msg["type"] = "register";
     msg["ip"]   = publicIp;
     msg["port"] = static_cast<int>(publicPort);
     msg["id"]   = publicId;
+
+    msg["room"] = room;
+    msg["mode"] = mode;
 
     webSocket->sendTextMessage(
         QJsonDocument(msg).toJson(QJsonDocument::Compact));
@@ -399,6 +403,15 @@ void VoiceChat::updatePeerList(const QJsonArray& peerArray)
 
     if (anyUnconnected && !punchTimer->isActive())
         punchTimer->start();
+
+    QStringList ids;
+    ids.reserve(peers.size());
+
+    for (const PeerInfo &p : std::as_const(peers)) {
+        ids << QString::number(p.id);
+    }
+
+    emit peersUpdated(ids);
 }
 
 void VoiceChat::onPunchTimerTimeout()
@@ -560,4 +573,25 @@ void VoiceChat::markPeerConnected(int index)
     emit statusChanged(QString("P2P link up: %1:%2")
                            .arg(peer.ip).arg(peer.port));
     if (audioSource) createPeerSink(peer);
+}
+
+void VoiceChat::setRoom(const QString &r)
+{
+    room = r;
+}
+
+void VoiceChat::setMode(const QString &m)
+{
+    mode = m;
+
+    if (webSocket->state() != QAbstractSocket::ConnectedState)
+        return;
+
+    QJsonObject msg;
+    msg["type"] = "mode";
+    msg["mode"] = mode;
+    msg["id"] = publicId;
+
+    webSocket->sendTextMessage(
+        QJsonDocument(msg).toJson(QJsonDocument::Compact));
 }
