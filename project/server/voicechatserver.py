@@ -23,6 +23,17 @@ async def broadcast_room(room):
                 pass
 
 
+async def send_rooms_list(websocket):
+    msg = json.dumps({
+        "type": "rooms_list",
+        "rooms": list(rooms.keys())
+    })
+    try:
+        await websocket.send(msg)
+    except:
+        pass
+
+
 async def relay_audio(room, sender_ws, data):
     for ws, info in clients.items():
         if info["room"] == room and ws != sender_ws:
@@ -44,8 +55,13 @@ async def handle_client(websocket):
                 continue
 
             data = json.loads(message)
+            msg_type = data.get("type")
 
-            if data["type"] in ["register", "join"]:
+            if msg_type == "get_rooms":
+                await send_rooms_list(websocket)
+                continue
+
+            if msg_type in ["register", "join"]:
 
                 room = data.get("room", "default")
 
@@ -67,7 +83,6 @@ async def handle_client(websocket):
                 if room not in rooms:
                     rooms[room] = {"peers": []}
 
-                # replace/update peer
                 rooms[room]["peers"] = [
                     p for p in rooms[room]["peers"]
                     if p["id"] != peer["id"]
@@ -75,8 +90,8 @@ async def handle_client(websocket):
                 rooms[room]["peers"].append(peer)
 
                 await broadcast_room(room)
-
-            elif data["type"] == "mode":
+                await send_rooms_list(websocket)
+            elif msg_type == "mode":
                 if websocket in clients:
                     clients[websocket]["mode"] = data["mode"]
 

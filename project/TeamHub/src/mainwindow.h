@@ -27,6 +27,8 @@ class MainWindow : public QMainWindow
 public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow() override;
+    QString currentVoiceRoom;
+    bool joiningVoiceRoom = false;
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -78,11 +80,17 @@ private:
     VoiceChat *voiceChat;
     QLabel *voipStatusLabel;
     QLabel *voipPeersLabel;
-    QPushButton *voipConnectBtn;
     QPushButton *voipCallBtn;
     QLineEdit *voipRoomEdit;
     QPushButton *voipJoinRoomBtn;
     QListWidget *voipUsersList;
+    QListWidget *voipRoomsList;
+    QPushButton *btnMuteMic;
+    QPushButton *btnDeafen;
+    QPushButton *btnLeave;
+    QPushButton *btnCreateRoom;
+    bool micMuted = false;
+    bool audioMuted = false;
 
     //Setup UI
     void setupMenuBar();
@@ -93,6 +101,7 @@ private:
     void setupEditorArea();
     void setupBottomDock();
     void setupVoipDock();
+    void setupVoipConnections();
     void setupStatusBar();
     void applyTheme();
 
@@ -101,6 +110,9 @@ private:
 
     void clearTabs();
     CodeEditor *createTab(const QString &name);
+
+    void joinRoom(const QString &room);
+    void addRoom(const QString &room);
 
 private slots:
     void onActivityButton(int page);

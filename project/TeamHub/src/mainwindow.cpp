@@ -65,25 +65,26 @@ MainWindow::MainWindow(QWidget *parent)
     connect(voiceChat, &VoiceChat::statusChanged, this, &MainWindow::onVoipStatusChanged);
     connect(voiceChat, &VoiceChat::peerConnected, this, &MainWindow::onVoipPeerConnected);
     connect(voiceChat, &VoiceChat::peerDisconnected, this, &MainWindow::onVoipPeerDisconnected);
-    connect(voiceChat, &VoiceChat::connectedToServer, this, [this]() {
-        voipConnectBtn->setText("Disconnect");
-        voipCallBtn->setEnabled(true);
+
+    connect(voiceChat, &VoiceChat::peersUpdated, this, &MainWindow::onVoipPeersUpdated);
+    connect(voiceChat, &VoiceChat::roomsUpdated, this, [this](const QStringList &rooms) {
+        voipRoomsList->clear();
+
+        for (const QString &r : rooms) {
+            voipRoomsList->addItem(r);
+        }
+
+        outputPane->appendPlainText("[VoIP] Rooms updated: " + QString::number(rooms.size()));
     });
-    connect(voiceChat, &VoiceChat::disconnectedFromServer, this, [this]() {
-        voipConnectBtn->setText("Connect");
-        voipCallBtn->setEnabled(false);
-        voipCallBtn->setText("Start Call");
-        voipPeersLabel->setText("Peers: none");
-    });
-    connect(voiceChat, &VoiceChat::peersUpdated,
-            this, &MainWindow::onVoipPeersUpdated);
 }
 
 MainWindow::~MainWindow() = default;
 
 void MainWindow::onVoipStatusChanged(const QString &status)
 {
-    voipStatusLabel->setText(status);
+    if (voipStatusLabel)
+        voipStatusLabel->setText(status);
+
     outputPane->appendPlainText("[VoIP] " + status);
 }
 
@@ -100,14 +101,21 @@ void MainWindow::onVoipCallClicked()
 
 void MainWindow::onVoipPeerConnected(const QString &ip, quint16 port)
 {
-    voipPeersLabel->setText(QString("Peer: %1:%2 ✓").arg(ip).arg(port));
+    if (voipPeersLabel)
+        voipPeersLabel->setText(QString("Peer: %1:%2 ✓").arg(ip).arg(port));
+
     outputPane->appendPlainText(QString("[VoIP] P2P link up: %1:%2").arg(ip).arg(port));
 }
 
 void MainWindow::onVoipPeerDisconnected(const QString &ip, quint16 port)
 {
-    voipPeersLabel->setText("Peers: none");
-    outputPane->appendPlainText(QString("[VoIP] Peer left: %1:%2").arg(ip).arg(port));
+    Q_UNUSED(ip)
+    Q_UNUSED(port)
+
+    if (voipPeersLabel)
+        voipPeersLabel->setText("Peers: none");
+
+    outputPane->appendPlainText("[VoIP] Peer left");
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)
@@ -173,8 +181,9 @@ void MainWindow::setupMenuBar()
     editMenu->addSeparator();
     auto *actFind = editMenu->addAction("&Find / Replace...", QKeySequence("Ctrl+F"));
     connect(actFind, &QAction::triggered, this, [this]() {
-        CodeEditor* ed = qobject_cast<CodeEditor*>(editorTabs->currentWidget());
-        if (ed) ed->showSearch();
+        CodeEditor *ed = qobject_cast<CodeEditor *>(editorTabs->currentWidget());
+        if (ed)
+            ed->showSearch();
     });
     auto *actGoto = editMenu->addAction("&Go to Line...", QKeySequence("Ctrl+G"));
     actGoto->setEnabled(false);
@@ -524,99 +533,72 @@ void MainWindow::setupBottomDock()
 
 void MainWindow::setupVoipDock()
 {
-    voipDock = new QDockWidget("Voice", this);
+    voipDock = new QDockWidget("Voice Rooms", this);
     voipDock->setObjectName("voipDock");
-    voipDock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable
-                          | QDockWidget::DockWidgetFloatable);
-    voipDock->setAllowedAreas(Qt::RightDockWidgetArea | Qt::LeftDockWidgetArea);
 
     auto *panel = new QWidget;
     panel->setObjectName("voipPanel");
-    auto *vbox = new QVBoxLayout(panel);
-    vbox->setContentsMargins(12, 12, 12, 12);
-    vbox->setSpacing(8);
 
-    voipStatusLabel = new QLabel("Not connected");
-    voipStatusLabel->setAlignment(Qt::AlignCenter);
-    voipStatusLabel->setWordWrap(true);
+    auto *root = new QVBoxLayout(panel);
+    root->setContentsMargins(10, 10, 10, 10);
+    root->setSpacing(8);
+
+    voipStatusLabel = new QLabel("Disconnected");
     voipStatusLabel->setObjectName("stubLabel");
-    vbox->addWidget(voipStatusLabel);
-
-    auto *serverEdit = new QLineEdit("localhost");
-    serverEdit->setObjectName("fileSearch");
-    serverEdit->setPlaceholderText("Server host");
-    serverEdit->setObjectName("voipServerEdit");
-    vbox->addWidget(serverEdit);
-
-    auto *portEdit = new QLineEdit("9000");
-    portEdit->setObjectName("fileSearch");
-    portEdit->setPlaceholderText("Port");
-    portEdit->setObjectName("voipPortEdit");
-    vbox->addWidget(portEdit);
-
-    voipConnectBtn = new QPushButton("Connect");
-    voipConnectBtn->setObjectName("voipBtn");
-    vbox->addWidget(voipConnectBtn);
+    root->addWidget(voipStatusLabel);
 
     voipPeersLabel = new QLabel("Peers: none");
-    voipPeersLabel->setAlignment(Qt::AlignCenter);
     voipPeersLabel->setObjectName("stubLabel");
-    voipPeersLabel->setWordWrap(true);
-    vbox->addWidget(voipPeersLabel);
+    root->addWidget(voipPeersLabel);
 
-    vbox->addStretch(1);
-    voipRoomEdit = new QLineEdit("default");
-    voipRoomEdit->setPlaceholderText("Room name");
-    voipRoomEdit->setObjectName("voipServerEdit");
-    vbox->addWidget(voipRoomEdit);
+    auto *roomsHeader = new QLabel("ROOMS");
+    roomsHeader->setObjectName("stubLabel");
+    root->addWidget(roomsHeader);
 
-    voipJoinRoomBtn = new QPushButton("Join Room");
-    voipJoinRoomBtn->setObjectName("voipBtn");
-    vbox->addWidget(voipJoinRoomBtn);
+    voipRoomsList = new QListWidget;
+    voipRoomsList->setObjectName("voipRoomsList");
+    root->addWidget(voipRoomsList, 2);
+
+    btnCreateRoom = new QPushButton("Create Room");
+    btnCreateRoom->setObjectName("voipBtn");
+    root->addWidget(btnCreateRoom);
+
+    auto *usersHeader = new QLabel("USERS");
+    usersHeader->setObjectName("stubLabel");
+    root->addWidget(usersHeader);
 
     voipUsersList = new QListWidget;
-    voipUsersList->setObjectName("teamList");
-    vbox->addWidget(voipUsersList);
-    voipCallBtn = new QPushButton("Start Call");
-    voipCallBtn->setObjectName("voipBtn");
-    voipCallBtn->setEnabled(false);
-    vbox->addWidget(voipCallBtn);
+    voipUsersList->setObjectName("voipUsersList");
+    root->addWidget(voipUsersList, 3);
+
+    auto *controls = new QFrame;
+    controls->setObjectName("voipControls");
+
+    auto *h = new QHBoxLayout(controls);
+    h->setContentsMargins(0, 0, 0, 0);
+
+    btnMuteMic = new QPushButton(u8"\U0001F3A4");
+    btnMuteMic->setCheckable(true);
+
+    btnDeafen = new QPushButton(u8"\U0001F3A7");
+    btnDeafen->setCheckable(true);
+
+    btnLeave = new QPushButton("Leave");
+
+    for (auto *b : {btnMuteMic, btnDeafen, btnLeave})
+        b->setObjectName("voipBtn");
+
+    h->addWidget(btnMuteMic);
+    h->addWidget(btnDeafen);
+    h->addWidget(btnLeave);
+
+    root->addWidget(controls);
 
     voipDock->setWidget(panel);
     addDockWidget(Qt::RightDockWidgetArea, voipDock);
     voipDock->hide();
 
-
-    connect(voipConnectBtn, &QPushButton::clicked, this, [this, serverEdit, portEdit]() {
-        if (voiceChat->isConnected()) {
-            voiceChat->disconnectFromServer();
-            voipConnectBtn->setText("Connect");
-            voipCallBtn->setEnabled(false);
-        } else {
-            QString host = serverEdit->text().trimmed();
-            quint16 port = portEdit->text().toUShort();
-            if (host.isEmpty() || port == 0)
-                return;
-            voiceChat->connectToServer(host, port);
-        }
-    });
-
-    connect(voipCallBtn, &QPushButton::clicked, this, &MainWindow::onVoipCallClicked);
-    connect(voipJoinRoomBtn, &QPushButton::clicked, this, [this, serverEdit, portEdit]() {
-        QString host = serverEdit->text().trimmed();
-        quint16 port = portEdit->text().toUShort();
-
-        QString room = voipRoomEdit->text().trimmed();
-        if (room.isEmpty())
-            room = "default";
-
-        voiceChat->disconnectFromServer();
-
-        voiceChat->setRoom(room);
-        voiceChat->connectToServer(host, port);
-
-        voipUsersList->clear();
-    });
+    setupVoipConnections();
 }
 
 void MainWindow::setupStatusBar()
@@ -858,6 +840,26 @@ QPushButton#voipBtn {
 QPushButton#voipBtn:hover   { background: #505050; }
 QPushButton#voipBtn:pressed { background: #007acc; }
 QPushButton#voipBtn:disabled { color: #555555; }
+QListWidget#voipRoomsList,
+QListWidget#voipUsersList {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    border: 1px solid #333;
+}
+
+QFrame#voipControls {
+    background: #2a2a2a;
+    border-top: 1px solid #444;
+}
+
+QPushButton#voipBtn {
+    background: #3c3c3c;
+    border-radius: 6px;
+    padding: 6px;
+}
+QPushButton#voipBtn:checked {
+    background: #007acc;
+}
 /* ── Shared stub label ──────────────────────────────────────── */
 QLabel#stubLabel { color: #555555; font-size: 11px; }
 
@@ -1183,8 +1185,17 @@ void MainWindow::toggleBottomDock()
 
 void MainWindow::toggleVoipDock()
 {
-    voipDock->setVisible(!voipDock->isVisible());
-    btnVoip->setChecked(voipDock->isVisible());
+    const bool willShow = !voipDock->isVisible();
+
+    voipDock->setVisible(willShow);
+
+    btnVoip->setChecked(willShow);
+
+    if (willShow && !voiceChat->isConnected()) {
+        voiceChat->connectToServer("localhost", 9000);
+
+        outputPane->appendPlainText("[VoIP] Connecting...");
+    }
 }
 
 void MainWindow::onVoipPeersUpdated(const QStringList &ids)
@@ -1194,4 +1205,93 @@ void MainWindow::onVoipPeersUpdated(const QStringList &ids)
     for (const QString &id : ids) {
         voipUsersList->addItem("User ID: " + id);
     }
+}
+
+void MainWindow::setupVoipConnections()
+{
+    connect(btnCreateRoom, &QPushButton::clicked, this, [this]() {
+        QString room = QInputDialog::getText(this, "Create Room", "Room name:");
+        if (room.isEmpty())
+            return;
+
+        addRoom(room);
+        joinRoom(room);
+    });
+
+    connect(voipRoomsList, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *item) {
+        joinRoom(item->text());
+    });
+
+    connect(btnMuteMic, &QPushButton::toggled, this, [this](bool on) {
+        micMuted = on;
+        voiceChat->setMicMuted(on);
+        outputPane->appendPlainText(on ? "[VoIP] Mic muted" : "[VoIP] Mic unmuted");
+    });
+
+    connect(btnDeafen, &QPushButton::toggled, this, [this](bool on) {
+        audioMuted = on;
+        voiceChat->setAudioMuted(on);
+        outputPane->appendPlainText(on ? "[VoIP] Audio muted" : "[VoIP] Audio unmuted");
+    });
+
+    connect(btnLeave, &QPushButton::clicked, this, [this]() {
+        voiceChat->disconnectFromServer();
+        voipUsersList->clear();
+        outputPane->appendPlainText("[VoIP] Left room");
+    });
+}
+
+void MainWindow::addRoom(const QString &room)
+{
+    bool exists = false;
+
+    for (int i = 0; i < voipRoomsList->count(); i++) {
+        if (voipRoomsList->item(i)->text() == room) {
+            exists = true;
+            break;
+        }
+    }
+
+    if (!exists) {
+        voipRoomsList->addItem(room);
+    }
+}
+
+void MainWindow::joinRoom(const QString &room)
+{
+    if (joiningVoiceRoom)
+        return;
+
+    if (currentVoiceRoom == room && voiceChat->isConnected()) {
+        outputPane->appendPlainText("[VoIP] Already in room: " + room);
+        return;
+    }
+
+    joiningVoiceRoom = true;
+    currentVoiceRoom = room;
+    voipUsersList->clear();
+
+    disconnect(voiceChat, &VoiceChat::connectedToServer, this, nullptr);
+
+    connect(
+        voiceChat,
+        &VoiceChat::connectedToServer,
+        this,
+        [this]() {
+            if (!voiceChat->isCallActive()) {
+                voiceChat->startCall();
+                outputPane->appendPlainText("[VoIP] Voice stream started");
+            }
+            joiningVoiceRoom = false;
+        },
+        Qt::SingleShotConnection);
+
+    voiceChat->setRoom(room);
+    outputPane->appendPlainText("[VoIP] Joining room: " + room);
+
+    if (voiceChat->isConnected()) {
+        voiceChat->disconnectFromServer();
+    }
+
+    QTimer::singleShot(300, this, [this]() { voiceChat->connectToServer("localhost", 9000); });
 }

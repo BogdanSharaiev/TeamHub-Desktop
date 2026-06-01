@@ -5,6 +5,8 @@
 #include <QAudioSource>
 #include <QHostInfo>
 #include <QIODevice>
+#include <QJsonArray>
+#include <QNetworkInterface>
 #include <QObject>
 #include <QRandomGenerator>
 #include <QTimer>
@@ -12,7 +14,6 @@
 #include <QWebSocket>
 #include <QtEndian>
 #include <cstring>
-#include <QJsonArray>
 
 #include <opus/opus.h>
 
@@ -42,6 +43,12 @@ public:
     bool isConnected() const;
     void setRoom(const QString &r);
 
+    bool micMuted = false;
+    bool audioMuted = false;
+
+    void setMicMuted(bool m) { micMuted = m; }
+    void setAudioMuted(bool m) { audioMuted = m; }
+
 signals:
     void statusChanged(const QString &status);
     void peerConnected(const QString &ip, quint16 port);
@@ -49,6 +56,7 @@ signals:
     void connectedToServer();
     void disconnectedFromServer();
     void peersUpdated(const QStringList &ids);
+    void roomsUpdated(const QStringList &rooms);
 
 private slots:
     void onUdpReadyRead();
@@ -90,15 +98,14 @@ private:
     QString serverHost;
     quint16 serverPort = 0;
 
-    OpusEncoder* opusEncoder = nullptr;
-    OpusDecoder* opusDecoder = nullptr;
+    OpusEncoder *opusEncoder = nullptr;
+    OpusDecoder *opusDecoder = nullptr;
     QByteArray captureBuffer;
     static constexpr int OPUS_FRAME_SIZE = 320;
-    QTimer* flushTimer;
+    QTimer *flushTimer;
 
     QString room = "default";
     QString mode = "hybrid"; // relay / hybrid / p2p
-
 };
 
 #endif // VOICECHAT_H
