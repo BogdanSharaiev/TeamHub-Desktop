@@ -4,13 +4,13 @@
 #include <Qsci/qscicommandset.h>
 
 #include <QColor>
+#include <QDir>
 #include <QFile>
 #include <QFont>
 #include <QKeyEvent>
 #include <QRegularExpression>
 #include <QTextCursor>
 #include <QTextStream>
-#include <QDir>
 
 static const QList<QPair<QChar, QChar>> kAutoPairs = {
     {'(', ')'},
@@ -357,11 +357,9 @@ void CodeEditor::setupLinter()
     lintTimer->setSingleShot(true);
     lintTimer->setInterval(800);
 
-    connect(lintTimer, &QTimer::timeout,
-            this, &CodeEditor::checkSyntax);
+    connect(lintTimer, &QTimer::timeout, this, &CodeEditor::checkSyntax);
 
-    connect(this, SIGNAL(textChanged()),
-            lintTimer, SLOT(start()));
+    connect(this, SIGNAL(textChanged()), lintTimer, SLOT(start()));
 }
 
 void CodeEditor::checkSyntax()
@@ -379,10 +377,8 @@ void CodeEditor::checkSyntax()
 
     QString tmpPath = QDir::tempPath() + "/teamhub_lint_tmp.py";
     QFile tmpFile(tmpPath);
-    if (!tmpFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        qDebug() << "[Linter] Cannot write temp file:" << tmpPath;
+    if (!tmpFile.open(QIODevice::WriteOnly | QIODevice::Text))
         return;
-    }
     QTextStream stream(&tmpFile);
     stream.setEncoding(QStringConverter::Utf8);
     stream << text();
@@ -393,13 +389,18 @@ void CodeEditor::checkSyntax()
 
     connect(lintProcess,
             QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-            this, &CodeEditor::onLintFinished);
+            this,
+            &CodeEditor::onLintFinished);
 
-    qDebug() << "[Linter] Running pyflakes on:" << tmpPath;
-    lintProcess->start("python", {"-m", "pyflakes", tmpPath});
+    lintProcess->start("python",
+                       {"-m",
+                        "ruff",
+                        "check",
+                        "--output-format=concise",
+                        "--select=E,F,W",
+                        tmpPath});
 
     if (!lintProcess->waitForStarted(3000)) {
-        qDebug() << "[Linter] Failed to start:" << lintProcess->errorString();
         delete lintProcess;
         lintProcess = nullptr;
         QFile::remove(tmpPath);
@@ -410,16 +411,11 @@ void CodeEditor::checkSyntax()
 void CodeEditor::onLintFinished(int exitCode, QProcess::ExitStatus status)
 {
     Q_UNUSED(status)
-    if (!lintProcess) return;
+    if (!lintProcess)
+        return;
 
-    const QString out = QString::fromUtf8(
-                            lintProcess->readAllStandardOutput()).trimmed();
-    const QString err = QString::fromUtf8(
-                            lintProcess->readAllStandardError()).trimmed();
-
-    qDebug() << "[Linter] exitCode:" << exitCode;
-    qDebug() << "[Linter] stdout:" << out;
-    qDebug() << "[Linter] stderr:" << err;
+    const QString out = QString::fromUtf8(lintProcess->readAllStandardOutput()).trimmed();
+    const QString err = QString::fromUtf8(lintProcess->readAllStandardError()).trimmed();
 
     lintProcess->deleteLater();
     lintProcess = nullptr;
@@ -433,42 +429,73 @@ void CodeEditor::onLintFinished(int exitCode, QProcess::ExitStatus status)
     else
         combined = out.isEmpty() ? err : out;
 
-    if (combined.isEmpty()) {
-        qDebug() << "[Linter] No output";
+    errorList.clear();
+
+    if (combined.isEmpty())
         return;
-    }
 
-    static const QRegularExpression re(
-        R"([^:]+:(\d+):(\d+)[: ].+)");
+    static const QRegularExpression re(R"([^:]+:(\d+):(\d+):\s*([\w-]+(?:\d*):\s*.+))");
 
-    int matchCount = 0;
-    for (const QString& rawLine : combined.split('\n')) {
+    for (const QString &rawLine : combined.split('\n')) {
         const QString line = rawLine.trimmed();
-        if (line.isEmpty()) continue;
-
-        qDebug() << "[Linter] Checking:" << line;
+        if (line.isEmpty())
+            continue;
 
         const auto match = re.match(line);
-        if (!match.hasMatch()) {
-            qDebug() << "[Linter] No match:" << line;
+        if (!match.hasMatch())
             continue;
-        }
 
-        const int ln  = match.captured(1).toInt() - 1;
+        const int ln = match.captured(1).toInt() - 1;
         const int col = std::max(0, match.captured(2).toInt() - 1);
+        const QString msg = match.captured(3).trimmed();
 
-        if (ln < 0 || ln >= lines()) {
-            qDebug() << "[Linter] Out of range:" << ln;
+        if (ln < 0 || ln >= lines())
             continue;
-        }
 
         const int len = std::max(1, lineLength(ln) - col - 1);
-        qDebug() << "[Linter] Highlight ln=" << ln << "col=" << col << "len=" << len;
         fillIndicatorRange(ln, col, ln, col + len, ErrorIndicator);
-        matchCount++;
+
+        errorList.append({ln, col, msg});
+    }
+}
+
+void CodeEditor::mouseMoveEvent(QMouseEvent *event)
+{
+    QsciScintilla::mouseMoveEvent(event);
+
+    const int pos = SendScintilla(SCI_POSITIONFROMPOINT,
+                                  event->pos().x(),
+                                  event->pos().y());
+
+    const int indicators = SendScintilla(SCI_INDICATORALLONFOR, pos);
+
+    if (indicators & (1 << ErrorIndicator)) {
+        int line, col;
+        lineIndexFromPosition(pos, &line, &col);
+
+        const ErrorInfo* closest = nullptr;
+        int minDist = INT_MAX;
+
+        for (const ErrorInfo& err : std::as_const(errorList)) {
+            if (err.line != line) continue;
+
+            int dist = std::abs(col - err.col);
+            if (dist < minDist) {
+                minDist = dist;
+                closest = &err;
+            }
+        }
+
+        if (closest) {
+            QToolTip::showText(
+                event->globalPosition().toPoint(),
+                closest->message,
+                this);
+            return;
+        }
     }
 
-    qDebug() << "[Linter] Total:" << matchCount;
+    QToolTip::hideText();
 }
 
 void CodeEditor::loadFile(const QString &filepath)
@@ -796,7 +823,7 @@ void CodeEditor::onReplaceAll(const QString &findText, const QString &replaceTex
     searchMatches.clear();
 }
 
-void CodeEditor::selectCurrentMatch(const QString& searchText)
+void CodeEditor::selectCurrentMatch(const QString &searchText)
 {
     if (searchMatches.isEmpty())
         return;
@@ -813,6 +840,5 @@ void CodeEditor::selectCurrentMatch(const QString& searchText)
 
     ensureLineVisible(line);
 
-    textSearch->updateMatchLabel(searchCurrentIndex + 1,
-                                 searchMatches.size());
+    textSearch->updateMatchLabel(searchCurrentIndex + 1, searchMatches.size());
 }

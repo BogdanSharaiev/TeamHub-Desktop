@@ -6,9 +6,11 @@
 #include <Qsci/qsciscintilla.h>
 
 #include <QKeyEvent>
+#include <QMouseEvent>
 #include <QProcess>
 #include <QString>
 #include <QTimer>
+#include <QToolTip>
 #include <QWidget>
 
 #include "textsearch.h"
@@ -64,9 +66,18 @@ signals:
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
-    void resizeEvent(QResizeEvent* event) override;
+    void resizeEvent(QResizeEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
 
 private:
+    struct ErrorInfo
+    {
+        int line;
+        int col;
+        QString message;
+    };
+    QList<ErrorInfo> errorList;
+
     void setupLexer();
     void setupFonts();
     void setupMargins();
@@ -93,9 +104,9 @@ private:
     QTimer *lintTimer;
 
     TextSearch *textSearch;
-    void updateSearchHighlights(const QString& text);
-    void selectCurrentMatch(const QString& searchText);
-    int  searchCurrentIndex = 0;
+    void updateSearchHighlights(const QString &text);
+    void selectCurrentMatch(const QString &searchText);
+    int searchCurrentIndex = 0;
     QList<int> searchMatches;
 };
 
