@@ -3,6 +3,7 @@
 
 #include "rganode.h"
 #include <QList>
+#include <QSet>
 #include <QString>
 
 class RGASequence{

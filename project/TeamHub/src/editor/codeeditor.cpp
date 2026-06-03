@@ -7,10 +7,34 @@
 #include <QDir>
 #include <QFile>
 #include <QFont>
+#include <QFontMetrics>
 #include <QKeyEvent>
+#include <QPainter>
 #include <QRegularExpression>
+#include <QScrollBar>
 #include <QTextCursor>
 #include <QTextStream>
+
+class RemoteCursorOverlay : public QWidget
+{
+public:
+    explicit RemoteCursorOverlay(CodeEditor* editor)
+        : QWidget(editor->viewport()), ed(editor)
+    {
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+        setAttribute(Qt::WA_NoSystemBackground);
+        setAutoFillBackground(false);
+        resize(editor->viewport()->size());
+        show();
+        raise();
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override { ed->paintRemoteCursors(this); }
+
+private:
+    CodeEditor* ed;
+};
 
 static const QList<QPair<QChar, QChar>> kAutoPairs = {
     {'(', ')'},
@@ -18,6 +42,12 @@ static const QList<QPair<QChar, QChar>> kAutoPairs = {
     {'{', '}'},
     {'"', '"'},
     {'\'', '\''},
+};
+const QColor CodeEditor::kCursorColors[4] = {
+    QColor("#007acc"),
+    QColor("#f44747"),
+    QColor("#4ec9b0"),
+    QColor("#d7ba7d"),
 };
 
 CodeEditor::CodeEditor(QWidget *parent)
@@ -117,6 +147,13 @@ void CodeEditor::setupEditor()
 
     SendScintilla(SCI_SETMULTIPLESELECTION, 1);
     SendScintilla(SCI_SETADDITIONALSELECTIONTYPING, 1);
+
+    cursorOverlay = new RemoteCursorOverlay(this);
+
+    connect(verticalScrollBar(),   &QScrollBar::valueChanged,
+            cursorOverlay, QOverload<>::of(&QWidget::update));
+    connect(horizontalScrollBar(), &QScrollBar::valueChanged,
+            cursorOverlay, QOverload<>::of(&QWidget::update));
 }
 
 void CodeEditor::onCursorChanged(int line, int index)
@@ -183,11 +220,8 @@ void CodeEditor::keyPressEvent(QKeyEvent *event)
                 if (sendChar == '\n') {
                     int newPos = SendScintilla(SCI_GETCURRENTPOS);
                     int indentLen = newPos - (pos + 1);
-                    if (indentLen > 0) {
-                        QString fullText = text();
-                        for (int i = 0; i < indentLen; i++) {
-                            emit localInsert(pos + 1 + i, fullText.at(pos + 1 + i));
-                        }
+                    for (int i = 0; i < indentLen; i++) {
+                        emit localInsert(pos + 1 + i, QChar(' '));
                     }
                 }
                 return;
@@ -681,19 +715,20 @@ void CodeEditor::applyRemoteText(const QString &newText)
 {
     applyingRemote = true;
     blockSignals(true);
+    int curLine = 0, curCol = 0;
+    getCursorPosition(&curLine, &curCol);
+    const int firstVisLine = (int)SendScintilla(SCI_GETFIRSTVISIBLELINE);
 
-    int oldPos = SendScintilla(SCI_GETCURRENTPOS);
     setText(newText);
-    SendScintilla(SCI_CLEARSELECTIONS);
-    SendScintilla(SCI_SETSELECTION, -1, -1);
 
-    int maxPos = SendScintilla(SCI_GETTEXTLENGTH);
-    int newPos = qMin(oldPos, maxPos);
+    const int totalLines = lines();
+    if (curLine >= totalLines)
+        curLine = qMax(0, totalLines - 1);
+    setCursorPosition(curLine, curCol);
 
-    SendScintilla(SCI_SETSEL, newPos, newPos);
+    SendScintilla(SCI_SETFIRSTVISIBLELINE, (ulong)firstVisLine);
 
-    SendScintilla(SCI_SCROLLCARET);
-    update();
+    if (cursorOverlay) cursorOverlay->update();
 
     blockSignals(false);
     applyingRemote = false;
@@ -729,6 +764,8 @@ void CodeEditor::repositionSearch()
 void CodeEditor::resizeEvent(QResizeEvent *event)
 {
     QsciScintilla::resizeEvent(event);
+    if (cursorOverlay)
+        cursorOverlay->resize(viewport()->size());
     if (textSearch->isVisible())
         repositionSearch();
 }
@@ -841,4 +878,65 @@ void CodeEditor::selectCurrentMatch(const QString &searchText)
     ensureLineVisible(line);
 
     textSearch->updateMatchLabel(searchCurrentIndex + 1, searchMatches.size());
+}
+
+void CodeEditor::updateRemoteCursor(int siteId, int scintillaPos)
+{
+    remoteCursorPositions[siteId] = scintillaPos;
+    if (cursorOverlay) cursorOverlay->update();
+}
+
+void CodeEditor::removeRemoteCursor(int siteId)
+{
+    remoteCursorPositions.remove(siteId);
+    if (cursorOverlay) cursorOverlay->update();
+}
+
+void CodeEditor::clearRemoteCursors()
+{
+    remoteCursorPositions.clear();
+    if (cursorOverlay) cursorOverlay->update();
+}
+
+void CodeEditor::paintRemoteCursors(QWidget* overlay)
+{
+    if (remoteCursorPositions.isEmpty()) return;
+
+    QPainter painter(overlay);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+
+    QFont labelFont = painter.font();
+    labelFont.setPointSize(7);
+    painter.setFont(labelFont);
+    QFontMetrics fm(labelFont);
+
+    for (auto it = remoteCursorPositions.constBegin();
+         it != remoteCursorPositions.constEnd(); ++it)
+    {
+        const int siteId = it.key();
+        const int sciPos = it.value();
+        const QColor color = kCursorColors[std::abs(siteId) % 4];
+
+        const int x = (int)SendScintilla(SCI_POINTXFROMPOSITION, 0UL, (long)sciPos);
+        const int y = (int)SendScintilla(SCI_POINTYFROMPOSITION, 0UL, (long)sciPos);
+        const int line       = (int)SendScintilla(SCI_LINEFROMPOSITION, (ulong)sciPos);
+        const int lineHeight = (int)SendScintilla(SCI_TEXTHEIGHT, (ulong)line);
+
+        if (y + lineHeight < 0 || y > overlay->height()) continue;
+
+        painter.setPen(QPen(color, 2));
+        painter.drawLine(x, y, x, y + lineHeight);
+
+        const QString label = QString("U%1").arg(siteId);
+        const int labelW = fm.horizontalAdvance(label) + 6;
+        const int labelH = fm.height() + 2;
+        const int labelY = y - labelH;
+
+        if (labelY >= 0) {
+            painter.fillRect(x, labelY, labelW, labelH, color);
+            painter.setPen(Qt::white);
+            painter.drawText(QRect(x, labelY, labelW, labelH),
+                             Qt::AlignCenter, label);
+        }
+    }
 }

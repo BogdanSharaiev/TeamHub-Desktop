@@ -13,6 +13,7 @@
 #include <QTabWidget>
 #include <QToolButton>
 #include <QTreeWidget>
+#include <QRandomGenerator>
 
 #include "editor/codeeditor.h"
 #include "filebrowser/filebrowser.h"
@@ -74,7 +75,12 @@ private:
     QString currentFilePath;
 
     // RGA Colab
-    RGAManager *rgamanager;
+    //RGAManager *rgamanager;
+    QMap<CodeEditor*, RGAManager*> collabManagers;
+    QSet<CodeEditor*> collabTabs;
+    QListWidget* collabUsersList = nullptr;
+    QLabel*      collabStatusLabel = nullptr;
+    QPushButton* btnStopAllCollab = nullptr;
 
     // Voice
     VoiceChat *voiceChat;
@@ -114,6 +120,12 @@ private:
     void joinRoom(const QString &room);
     void addRoom(const QString &room);
 
+    RGAManager* getOrCreateManager(CodeEditor* ed);
+    void        stopAllCollab();
+    void        markTabAsCollab(CodeEditor* ed, bool on);
+    void onCollabUsersUpdated(QList<int> siteIds);
+    void wireEditorToManager(CodeEditor* ed, RGAManager* mgr);
+
 private slots:
     void onActivityButton(int page);
     void onCursorPositionUpdated(int line, int index);
@@ -135,7 +147,6 @@ private slots:
 
     void startCollab(const QString &room);
     void joinCollab();
-    void stopCollab();
 
     void onVoipCallClicked();
     void onVoipStatusChanged(const QString &status);

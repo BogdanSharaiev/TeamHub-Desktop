@@ -38,28 +38,6 @@ MainWindow::MainWindow(QWidget *parent)
     outputPane->appendPlainText("[TeamHub] Ready.");
     updateWindowTitle();
 
-    rgamanager = new RGAManager(time(nullptr), this);
-    connect(rgamanager, &RGAManager::remoteTextChanged, this, [this](const QString &text) {
-        CodeEditor *ed = qobject_cast<CodeEditor *>(editorTabs->currentWidget());
-        if (!ed)
-            return;
-
-        ed->applyRemoteText(text);
-    });
-
-    connect(rgamanager,
-            &RGAManager::onInitReceived,
-            this,
-            [this](const QString &text, const QString &filename) {
-                auto ed = createTab(filename);
-                ed->applyRemoteText(text);
-                editorTabs->setCurrentWidget(ed);
-
-                connect(ed, &CodeEditor::localInsert, rgamanager, &RGAManager::localInsert);
-                connect(ed, &CodeEditor::localDelete, rgamanager, &RGAManager::localRemove);
-                outputPane->appendPlainText("[TeamHub] Snapshot received: " + filename);
-            });
-
     voiceChat = new VoiceChat(this);
 
     connect(voiceChat, &VoiceChat::statusChanged, this, &MainWindow::onVoipStatusChanged);
@@ -274,7 +252,7 @@ void MainWindow::setupMainToolBar()
             }
             startCollab(room);
         } else {
-            stopCollab();
+            stopAllCollab();
         }
     });
 
@@ -283,65 +261,254 @@ void MainWindow::setupMainToolBar()
     connect(actCall, &QAction::triggered, this, &MainWindow::toggleVoipDock);
 }
 
-void MainWindow::startCollab(const QString &room)
+void MainWindow::startCollab(const QString& room)
 {
-    CodeEditor *activeEditor = qobject_cast<CodeEditor *>(editorTabs->currentWidget());
-    if (!activeEditor)
-        return;
+    CodeEditor* ed = qobject_cast<CodeEditor*>(editorTabs->currentWidget());
+    if (!ed) return;
 
-    QString url = QString("ws://localhost:8765/%1").arg(room);
-    QString text = activeEditor->text();
-    QString path = activeEditor->getFilePath();
+    if (collabManagers.contains(ed)) {
+        RGAManager* old = collabManagers.take(ed);
+        collabTabs.remove(ed);
+        markTabAsCollab(ed, false);
+        disconnect(ed, nullptr, old, nullptr);
+        disconnect(old, nullptr, ed, nullptr);
+        old->disconnectFromServer();
+        old->deleteLater();
+    }
 
-    rgamanager->disconnectFromServer();
-    rgamanager->connectToServer(url);
+    const int siteId = static_cast<int>(
+        QRandomGenerator::global()->bounded(100000u, 999999u));
+    auto* mgr = new RGAManager(siteId, this);
 
-    connect(activeEditor, &CodeEditor::localInsert, rgamanager, &RGAManager::localInsert);
-    connect(activeEditor, &CodeEditor::localDelete, rgamanager, &RGAManager::localRemove);
+    collabManagers[ed] = mgr;
+    collabTabs.insert(ed);
+    markTabAsCollab(ed, true);
 
-    connect(
-        rgamanager,
-        &RGAManager::connected,
-        this,
-        [this, text, path]() {
-            rgamanager->buildFromText(text);
-            rgamanager->sendInitText(text, path);
-            outputPane->appendPlainText("[TeamHub] Collab started");
-        },
-        Qt::SingleShotConnection);
+    const QString url  = QString("ws://localhost:8765/%1").arg(room);
+    const QString text = ed->text();
+    const QString path = ed->getFilePath();
+
+    wireEditorToManager(ed, mgr);
+
+    mgr->connectToServer(url);
+
+    connect(mgr, &RGAManager::connected, this,
+            [this, mgr, text, path]() {
+                mgr->buildFromText(text);
+                mgr->sendInitText(text, path);
+                outputPane->appendPlainText("[Collab] Started — you are host");
+                if (collabStatusLabel)
+                    collabStatusLabel->setText("Hosting collab");
+            }, Qt::SingleShotConnection);
+
+    connect(mgr, &RGAManager::errorOccurred, this,
+            [this](const QString& err) {
+                outputPane->appendPlainText("[Collab] Error: " + err);
+            });
+
+    outputPane->appendPlainText("[Collab] Starting room: " + room);
 }
 
 void MainWindow::joinCollab()
 {
-    bool ok;
-    QString room = QInputDialog::getText(this,
-                                         "Join Collaboration",
-                                         "Enter room name:",
-                                         QLineEdit::Normal,
-                                         "",
-                                         &ok);
+    bool ok = false;
+    const QString room = QInputDialog::getText(
+                             this, "Join Collaboration",
+                             "Enter room name:", QLineEdit::Normal, "", &ok).trimmed();
 
-    if (!ok || room.isEmpty())
-        return;
+    if (!ok || room.isEmpty()) return;
 
-    QString url = QString("ws://localhost:8765/%1").arg(room);
-    rgamanager->disconnectFromServer();
-    rgamanager->connectToServer(url);
-    clearTabs();
+    const QString url = QString("ws://localhost:8765/%1").arg(room);
+    const int siteId  = static_cast<int>(
+        QRandomGenerator::global()->bounded(100000u, 999999u));
 
-    outputPane->appendPlainText("[TeamHub] Joining room: " + room);
+    auto* mgr = new RGAManager(siteId, this);
+
+    outputPane->appendPlainText("[Collab] Joining room: " + room);
+
+    connect(mgr, &RGAManager::onInitReceived, this,
+            [this, mgr](const QString& text, const QString& filename) {
+                const QString tabName = filename.isEmpty() ? "Shared" : filename;
+
+                CodeEditor* ed = createTab(tabName);
+                ed->applyRemoteText(text);
+                editorTabs->setCurrentWidget(ed);
+
+                collabManagers[ed] = mgr;
+                collabTabs.insert(ed);
+                markTabAsCollab(ed, true);
+
+                wireEditorToManager(ed, mgr);
+
+                outputPane->appendPlainText("[Collab] Joined: " + tabName);
+                if (collabStatusLabel)
+                    collabStatusLabel->setText("Joined: " + tabName);
+            });
+
+    connect(mgr, &RGAManager::errorOccurred, this,
+            [this, mgr](const QString& err) {
+                outputPane->appendPlainText("[Collab] Error: " + err);
+                if (!collabManagers.values().contains(mgr))
+                    mgr->deleteLater();
+            });
+
+    mgr->connectToServer(url);
 }
 
-void MainWindow::stopCollab()
+void MainWindow::wireEditorToManager(CodeEditor* ed, RGAManager* mgr)
 {
-    CodeEditor *activeEditor = qobject_cast<CodeEditor *>(editorTabs->currentWidget());
-    if (activeEditor) {
-        disconnect(activeEditor, &CodeEditor::localInsert, rgamanager, &RGAManager::localInsert);
-        disconnect(activeEditor, &CodeEditor::localDelete, rgamanager, &RGAManager::localRemove);
-    }
-    rgamanager->disconnectFromServer();
-    outputPane->appendPlainText("[Collab] Session stopped.");
+    connect(ed, &CodeEditor::localInsert,
+            mgr, &RGAManager::localInsert,
+            Qt::UniqueConnection);
+
+    connect(ed, &CodeEditor::localDelete,
+            mgr, &RGAManager::localRemove,
+            Qt::UniqueConnection);
+
+    connect(mgr, &RGAManager::remoteTextChanged,
+            ed,
+            [ed](const QString& newText)
+            {
+                ed->applyRemoteText(newText);
+            });
+
+    connect(ed, &CodeEditor::cursorPositionUpdated,
+            ed,
+            [mgr, ed](int, int)
+            {
+                const int pos =
+                    ed->SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS);
+
+                mgr->sendCursorPosition(pos);
+            });
+
+    connect(mgr, &RGAManager::remoteCursorMoved,
+            ed,
+            &CodeEditor::updateRemoteCursor,
+            Qt::UniqueConnection);
+
+    connect(mgr, &RGAManager::remoteCursorLeft,
+            ed,
+            &CodeEditor::removeRemoteCursor,
+            Qt::UniqueConnection);
+
+    connect(mgr, &RGAManager::usersUpdated,
+            this,
+            &MainWindow::onCollabUsersUpdated,
+            Qt::UniqueConnection);
 }
+
+void MainWindow::stopAllCollab()
+{
+    for (auto it = collabManagers.begin(); it != collabManagers.end(); ++it) {
+        CodeEditor* ed  = it.key();
+        RGAManager* mgr = it.value();
+
+        disconnect(ed,  nullptr, mgr, nullptr);
+        disconnect(mgr, nullptr, ed,  nullptr);
+        disconnect(mgr, nullptr, this, nullptr);
+
+        ed->clearRemoteCursors();
+        mgr->disconnectFromServer();
+        mgr->deleteLater();
+
+        markTabAsCollab(ed, false);
+    }
+
+    collabManagers.clear();
+    collabTabs.clear();
+
+    if (collabUsersList)  collabUsersList->clear();
+    if (collabStatusLabel) collabStatusLabel->setText("Not in collab");
+
+    outputPane->appendPlainText("[Collab] All sessions stopped.");
+}
+
+void MainWindow::markTabAsCollab(CodeEditor* ed, bool on)
+{
+    const int idx = editorTabs->indexOf(ed);
+    if (idx < 0) return;
+
+    QString name = QFileInfo(ed->getFilePath()).fileName();
+    if (name.isEmpty()) name = "Untitled";
+
+    editorTabs->setTabText(idx, on ? ("⚡ " + name) : name);
+}
+
+void MainWindow::onCollabUsersUpdated(QList<int> siteIds)
+{
+    if (!collabUsersList) return;
+    collabUsersList->clear();
+    for (int id : siteIds)
+        collabUsersList->addItem(QString("User #%1").arg(id));
+    if (collabStatusLabel && !siteIds.isEmpty())
+        collabStatusLabel->setText(
+            QString("Collab — %1 user(s)").arg(siteIds.size()));
+}
+
+void MainWindow::onTabCloseRequested(int tabIndex)
+{
+    if (editorTabs->count() <= 1) return;
+
+    CodeEditor* tabEditor = qobject_cast<CodeEditor*>(
+        editorTabs->widget(tabIndex));
+    if (!tabEditor) return;
+
+    if (collabTabs.contains(tabEditor)) {
+        RGAManager* mgr = collabManagers.take(tabEditor);
+        collabTabs.remove(tabEditor);
+        if (mgr) {
+            disconnect(tabEditor, nullptr, mgr,        nullptr);
+            disconnect(mgr,       nullptr, tabEditor,  nullptr);
+            disconnect(mgr,       nullptr, this,       nullptr);
+            tabEditor->clearRemoteCursors();
+            mgr->disconnectFromServer();
+            mgr->deleteLater();
+        }
+        outputPane->appendPlainText("[Collab] Tab closed — session stopped.");
+    }
+
+    if (tabEditor->isModified()) {
+        const auto btn = QMessageBox::question(
+            this, "Unsaved Changes",
+            "Save changes before closing this tab?",
+            QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
+
+        if (btn == QMessageBox::Save) {
+            editor = tabEditor;
+            if (!saveFile()) return;
+        } else if (btn == QMessageBox::Cancel) {
+            return;
+        }
+    }
+
+    editorTabs->removeTab(tabIndex);
+}
+
+void MainWindow::setSidePanelPage(int index)
+{
+    const QStringList titles = {"EXPLORER", "TASKS", "TEAM", "COLLAB"};
+
+    if (index == activeSidePanel && leftPanel->isVisible()) {
+        leftPanel->setVisible(false);
+        activeSidePanel = -1;
+        btnFiles->setChecked(false);
+        btnTasks->setChecked(false);
+        btnTeam->setChecked(false);
+        return;
+    }
+
+    activeSidePanel = index;
+    leftPanel->setVisible(true);
+    leftStack->setCurrentIndex(index);
+    leftTitle->setText(titles.value(index, "PANEL"));
+
+    btnFiles->setChecked(index == 0);
+    btnTasks->setChecked(index == 1);
+    btnTeam->setChecked(index == 2);
+}
+
+
 
 void MainWindow::setupCentralWidget()
 {
@@ -398,6 +565,11 @@ void MainWindow::setupActivityBar()
     vbox->addWidget(btnTeam);
     vbox->addStretch(1);
 
+    auto* btnCollab = makeBtn("Collab", "Collaboration");
+    vbox->addWidget(btnCollab);
+    connect(btnCollab, &QToolButton::clicked,
+            this, [this]{ onActivityButton(3); });
+
     btnVoip = makeBtn("VoIP", "Voice");
     btnVoip->setObjectName("activityBtnVoip");
     vbox->addWidget(btnVoip);
@@ -445,6 +617,24 @@ void MainWindow::setupLeftPanel()
     leftStack->addWidget(teamList);
 
     vbox->addWidget(leftStack, 1);
+    auto* collabPane = new QWidget;
+    auto* vl = new QVBoxLayout(collabPane);
+
+    collabStatusLabel = new QLabel("Not in collab");
+    collabStatusLabel->setObjectName("stubLabel");
+    vl->addWidget(collabStatusLabel);
+
+    collabUsersList = new QListWidget;
+    collabUsersList->setObjectName("taskList");
+    vl->addWidget(collabUsersList, 1);
+
+    btnStopAllCollab = new QPushButton("Stop All Collab");
+    btnStopAllCollab->setObjectName("voipBtn");
+    connect(btnStopAllCollab, &QPushButton::clicked,
+            this, &MainWindow::stopAllCollab);
+    vl->addWidget(btnStopAllCollab);
+
+    leftStack->addWidget(collabPane);
 
     connect(fileBrowser, &FileBrowser::fileDoubleClicked, this, &MainWindow::openFileFromBrowser);
 }
@@ -932,28 +1122,7 @@ QLabel#statusLabel { color: #ffffff; padding: 0 4px; }
     )");
 }
 
-void MainWindow::setSidePanelPage(int index)
-{
-    const QStringList titles = {"EXPLORER", "TASKS", "TEAM"};
 
-    if (index == activeSidePanel && leftPanel->isVisible()) {
-        leftPanel->setVisible(false);
-        activeSidePanel = -1;
-        btnFiles->setChecked(false);
-        btnTasks->setChecked(false);
-        btnTeam->setChecked(false);
-        return;
-    }
-
-    activeSidePanel = index;
-    leftPanel->setVisible(true);
-    leftStack->setCurrentIndex(index);
-    leftTitle->setText(titles.value(index, "PANEL"));
-
-    btnFiles->setChecked(index == 0);
-    btnTasks->setChecked(index == 1);
-    btnTeam->setChecked(index == 2);
-}
 
 void MainWindow::updateWindowTitle()
 {
@@ -984,34 +1153,6 @@ void MainWindow::onModificationChanged(bool modified)
     const int idx = editorTabs->currentIndex();
     if (idx >= 0)
         editorTabs->setTabText(idx, name + dirty);
-}
-
-void MainWindow::onTabCloseRequested(int tabIndex)
-{
-    if (editorTabs->count() <= 1)
-        return;
-
-    CodeEditor *tabEditor = qobject_cast<CodeEditor *>(editorTabs->widget(tabIndex));
-    if (!tabEditor)
-        return;
-
-    if (tabEditor->isModified()) {
-        const auto btn = QMessageBox::question(this,
-                                               "Unsaved Changes",
-                                               "Save changes before closing this tab?",
-                                               QMessageBox::Save | QMessageBox::Discard
-                                                   | QMessageBox::Cancel);
-
-        if (btn == QMessageBox::Save) {
-            editor = tabEditor;
-            if (!saveFile())
-                return;
-        } else if (btn == QMessageBox::Cancel) {
-            return;
-        }
-    }
-
-    editorTabs->removeTab(tabIndex);
 }
 
 void MainWindow::runFile()

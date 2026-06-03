@@ -19,7 +19,10 @@ public:
     QString getText();
     void buildFromText(const QString& text);
     void sendInitText(const QString& text, const QString& path);
+    void sendCursorPosition(int scintillaPos);
+    int  getSiteId() const { return siteId; }
     void debug();
+
 signals:
     void textChanged(const QString& newText);
     void remoteTextChanged(const QString& newText);
@@ -27,6 +30,9 @@ signals:
     void disconnected();
     void errorOccurred(const QString& error);
     void onInitReceived(QString text, QString filename);
+    void remoteCursorMoved(int siteId, int position);
+    void remoteCursorLeft(int siteId);
+    void usersUpdated(QList<int> siteIds);
 
 private slots:
     void onConnected();
@@ -37,6 +43,7 @@ private slots:
 private:
     void remoteInsert(const RGANode& node);
     void remoteDelete(const RGAId& id);
+    void registerWithServer();
     QJsonObject nodeToJson(const RGANode& node);
     QJsonObject idToJson(const RGAId& id) const;
     RGANode     jsonToNode(const QJsonObject& obj);
@@ -50,5 +57,4 @@ private:
     int         siteId;
     int         timestamp;
 };
-
-#endif // RGAMANAGER_H
+#endif

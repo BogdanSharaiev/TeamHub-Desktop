@@ -40,10 +40,28 @@ void RGASequence::insert(const RGANode& node)
     if (!parentFound && !isRootId(node.parent))
         return;
 
-    while (insertIndex < rgaseq.size()
-           && rgaseq[insertIndex].parent == node.parent
-           && greaterById(rgaseq[insertIndex].id, node.id)) {
-        ++insertIndex;
+    auto encodeId = [](const RGAId& id) -> qint64 {
+        return ((qint64)id.timestamp << 32) | (quint32)id.siteId;
+    };
+
+    QSet<qint64> skippedSet;
+
+    while (insertIndex < rgaseq.size()) {
+        const RGANode& curr = rgaseq[insertIndex];
+
+        if (curr.parent == node.parent) {
+            if (greaterById(curr.id, node.id)) {
+                skippedSet.insert(encodeId(curr.id));
+                ++insertIndex;
+            } else {
+                break;
+            }
+        } else if (skippedSet.contains(encodeId(curr.parent))) {
+            skippedSet.insert(encodeId(curr.id));
+            ++insertIndex;
+        } else {
+            break;
+        }
     }
 
     rgaseq.insert(insertIndex, node);

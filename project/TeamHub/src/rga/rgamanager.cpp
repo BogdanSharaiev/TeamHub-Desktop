@@ -38,11 +38,27 @@ QString RGAManager::getText()
     return sequence.toText();
 }
 
-void RGAManager::localInsert(int position, QChar ch)
+static int byteOffsetToCharIndex(const QByteArray& utf8, int byteOffset)
+{
+    int charIndex = 0;
+    for (int b = 0; b < byteOffset && b < utf8.size(); ) {
+        const unsigned char c = static_cast<unsigned char>(utf8.at(b));
+        if      (c < 0x80) b += 1;
+        else if (c < 0xE0) b += 2;
+        else if (c < 0xF0) b += 3;
+        else               b += 4;
+        ++charIndex;
+    }
+    return charIndex;
+}
+
+void RGAManager::localInsert(int bytePos, QChar ch)
 {
     ++timestamp;
+    const QByteArray utf8 = sequence.toText().toUtf8();
+    const int charPos = byteOffsetToCharIndex(utf8, bytePos);
 
-    RGAId parentId = sequence.idAtPosition(position - 1);
+    RGAId parentId = sequence.idAtPosition(charPos - 1);
 
     RGANode node;
     node.id.timestamp = timestamp;
@@ -61,9 +77,12 @@ void RGAManager::localInsert(int position, QChar ch)
     emit textChanged(sequence.toText());
 }
 
-void RGAManager::localRemove(int position)
+void RGAManager::localRemove(int bytePos)
 {
-    RGAId id = sequence.idAtPosition(position);
+    const QByteArray utf8 = sequence.toText().toUtf8();
+    const int charPos = byteOffsetToCharIndex(utf8, bytePos);
+
+    RGAId id = sequence.idAtPosition(charPos);
 
     if (id.timestamp == 0 && id.siteId == 0) return;
 
@@ -92,6 +111,7 @@ void RGAManager::remoteDelete(const RGAId& id)
 
 void RGAManager::onConnected()
 {
+    registerWithServer();
     emit connected();
 }
 
@@ -127,6 +147,23 @@ void RGAManager::onMessageReceived(const QString& message)
         }
 
         emit onInitReceived(sequence.toText(), filename);
+    }
+    else if (type == "cursor") {
+        int sid = obj["siteId"].toInt();
+        int pos = obj["position"].toInt();
+        if (sid != siteId)
+            emit remoteCursorMoved(sid, pos);
+    }
+    else if (type == "cursor_leave") {
+        int sid = obj["siteId"].toInt();
+        emit remoteCursorLeft(sid);
+    }
+    else if (type == "user_list") {
+        QJsonArray arr = obj["siteIds"].toArray();
+        QList<int> ids;
+        for (const QJsonValue& v : arr)
+            if (!v.isNull()) ids.append(v.toInt());
+        emit usersUpdated(ids);
     }
 }
 
@@ -242,7 +279,24 @@ void RGAManager::sequenceFromJson(const QJsonArray& arr)
     timestamp = 0;
     for (const QJsonValue& val : arr) {
         RGANode node = jsonToNode(val.toObject());
-        sequence.rgaseq.append(node);
+        sequence.insert(node);
         timestamp = qMax(timestamp, node.id.timestamp);
     }
+}
+
+void RGAManager::registerWithServer()
+{
+    QJsonObject msg;
+    msg["type"]   = "register";
+    msg["siteId"] = siteId;
+    sendMessage(msg);
+}
+
+void RGAManager::sendCursorPosition(int scintillaPos)
+{
+    QJsonObject msg;
+    msg["type"]     = "cursor";
+    msg["siteId"]   = siteId;
+    msg["position"] = scintillaPos;
+    sendMessage(msg);
 }

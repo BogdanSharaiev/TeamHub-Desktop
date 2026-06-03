@@ -56,6 +56,11 @@ public slots:
     void onSearchClosed();
     void repositionSearch();
 
+    void updateRemoteCursor(int siteId, int scintillaPos);
+    void removeRemoteCursor(int siteId);
+    void clearRemoteCursors();
+    void paintRemoteCursors(QWidget* overlay);
+
 signals:
     void fileModified();
     void fileSaved();
@@ -77,6 +82,10 @@ private:
         QString message;
     };
     QList<ErrorInfo> errorList;
+
+    QMap<int, int> remoteCursorPositions;
+    QWidget*       cursorOverlay = nullptr;
+    static const QColor kCursorColors[4];
 
     void setupLexer();
     void setupFonts();
