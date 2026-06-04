@@ -59,7 +59,7 @@ public slots:
     void updateRemoteCursor(int siteId, int scintillaPos);
     void removeRemoteCursor(int siteId);
     void clearRemoteCursors();
-    void paintRemoteCursors(QWidget* overlay);
+    void paintRemoteCursors(QWidget *overlay);
 
 signals:
     void fileModified();
@@ -84,7 +84,7 @@ private:
     QList<ErrorInfo> errorList;
 
     QMap<int, int> remoteCursorPositions;
-    QWidget*       cursorOverlay = nullptr;
+    QWidget *cursorOverlay = nullptr;
     static const QColor kCursorColors[4];
 
     void setupLexer();
@@ -97,6 +97,8 @@ private:
     bool autoCloseChar(QKeyEvent *event);
     bool skipClosingChar(QKeyEvent *event);
     bool handleBackspaceInPair(QKeyEvent *event);
+
+    void shiftRemoteCursors(int fromBytePos, int byteDelta);
 
     void checkSyntax();
     void onLintFinished(int exitCode, QProcess::ExitStatus);

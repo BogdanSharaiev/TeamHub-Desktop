@@ -8,16 +8,16 @@
 #include <QMainWindow>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QRandomGenerator>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QTabWidget>
 #include <QToolButton>
 #include <QTreeWidget>
-#include <QRandomGenerator>
 
+#include "collab/collabsession.h"
 #include "editor/codeeditor.h"
 #include "filebrowser/filebrowser.h"
-#include "rga/rgamanager.h"
 #include "terminal/terminal.h"
 #include "voicechat/voicechat.h"
 
@@ -74,13 +74,15 @@ private:
     int activeSidePanel;
     QString currentFilePath;
 
-    // RGA Colab
-    //RGAManager *rgamanager;
-    QMap<CodeEditor*, RGAManager*> collabManagers;
-    QSet<CodeEditor*> collabTabs;
-    QListWidget* collabUsersList = nullptr;
-    QLabel*      collabStatusLabel = nullptr;
-    QPushButton* btnStopAllCollab = nullptr;
+    // Collaboration
+    CollabSession *m_session = nullptr;
+    QListWidget *collabUsersList = nullptr;
+    QLabel *collabStatusLabel = nullptr;
+    QPushButton *btnStopAllCollab = nullptr;
+    QPushButton *btnStartCollab = nullptr;
+    QPushButton *btnJoinCollab = nullptr;
+    QWidget *collabNoSessionPane = nullptr;
+    QWidget *collabInSessionPane = nullptr;
 
     // Voice
     VoiceChat *voiceChat;
@@ -120,11 +122,15 @@ private:
     void joinRoom(const QString &room);
     void addRoom(const QString &room);
 
-    RGAManager* getOrCreateManager(CodeEditor* ed);
-    void        stopAllCollab();
-    void        markTabAsCollab(CodeEditor* ed, bool on);
+    // Session helpers
+    void stopAllCollab();
+    void markTabAsCollab(CodeEditor *ed, bool on);
+    void wireEditorToManager(CodeEditor *ed, RGAManager *mgr);
+    void wireEditorToSession(CodeEditor *ed, const QString &relPath);
+
+    QString toSessionKey(const QString &editorPath) const;
+
     void onCollabUsersUpdated(QList<int> siteIds);
-    void wireEditorToManager(CodeEditor* ed, RGAManager* mgr);
 
 private slots:
     void onActivityButton(int page);
@@ -147,6 +153,12 @@ private slots:
 
     void startCollab(const QString &room);
     void joinCollab();
+
+    void onSessionProjectInit(int hostSiteId, const QStringList &files);
+    void onSessionRunOutput(const QString &text);
+    void onSessionFileCreated(const QString &relPath);
+    void onSessionFileDeleted(const QString &relPath);
+    void onSessionFileRenamed(const QString &oldPath, const QString &newPath);
 
     void onVoipCallClicked();
     void onVoipStatusChanged(const QString &status);

@@ -1,36 +1,48 @@
 #include "rgamanager.h"
-#include <QJsonArray>
 #include <QFileInfo>
+#include <QJsonArray>
 
-RGAManager::RGAManager(int siteId, QObject* parent)
+RGAManager::RGAManager(int siteId, QObject *parent)
     : QObject(parent)
     , socket(new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, this))
     , siteId(siteId)
     , timestamp(0)
 {
-    connect(socket, &QWebSocket::connected,
-            this, &RGAManager::onConnected);
-    connect(socket, &QWebSocket::disconnected,
-            this, &RGAManager::onDisconnected);
-    connect(socket, &QWebSocket::textMessageReceived,
-            this, &RGAManager::onMessageReceived);
-    connect(socket, QOverload<QAbstractSocket::SocketError>::of(&QWebSocket::error),
-            this, &RGAManager::onError);
+    connect(socket, &QWebSocket::connected, this, &RGAManager::onConnected);
+    connect(socket, &QWebSocket::disconnected, this, &RGAManager::onDisconnected);
+    connect(socket, &QWebSocket::textMessageReceived, this, &RGAManager::onRawMessage);
+    connect(socket,
+            QOverload<QAbstractSocket::SocketError>::of(&QWebSocket::error),
+            this,
+            &RGAManager::onError);
 }
 
-void RGAManager::connectToServer(const QString& url)
+void RGAManager::connectToServer(const QString &url)
 {
     socket->open(QUrl(url));
 }
-
 void RGAManager::disconnectFromServer()
 {
     socket->close();
 }
-
-bool RGAManager::isConnected()
+bool RGAManager::isConnected() const
 {
     return socket->state() == QAbstractSocket::ConnectedState;
+}
+
+void RGAManager::setFilePath(const QString &filePath)
+{
+    m_filePath = filePath;
+}
+
+void RGAManager::setSendFunction(std::function<void(QJsonObject)> fn)
+{
+    m_sendFn = std::move(fn);
+}
+
+void RGAManager::handleIncomingMessage(const QJsonObject &obj)
+{
+    processMessage(obj);
 }
 
 QString RGAManager::getText()
@@ -38,15 +50,19 @@ QString RGAManager::getText()
     return sequence.toText();
 }
 
-static int byteOffsetToCharIndex(const QByteArray& utf8, int byteOffset)
+static int byteOffsetToCharIndex(const QByteArray &utf8, int byteOffset)
 {
     int charIndex = 0;
-    for (int b = 0; b < byteOffset && b < utf8.size(); ) {
+    for (int b = 0; b < byteOffset && b < utf8.size();) {
         const unsigned char c = static_cast<unsigned char>(utf8.at(b));
-        if      (c < 0x80) b += 1;
-        else if (c < 0xE0) b += 2;
-        else if (c < 0xF0) b += 3;
-        else               b += 4;
+        if (c < 0x80)
+            b += 1;
+        else if (c < 0xE0)
+            b += 2;
+        else if (c < 0xF0)
+            b += 3;
+        else
+            b += 4;
         ++charIndex;
     }
     return charIndex;
@@ -58,14 +74,12 @@ void RGAManager::localInsert(int bytePos, QChar ch)
     const QByteArray utf8 = sequence.toText().toUtf8();
     const int charPos = byteOffsetToCharIndex(utf8, bytePos);
 
-    RGAId parentId = sequence.idAtPosition(charPos - 1);
-
     RGANode node;
     node.id.timestamp = timestamp;
-    node.id.siteId    = siteId;
-    node.parent       = parentId;
-    node.val          = ch;
-    node.tombstone    = false;
+    node.id.siteId = siteId;
+    node.parent = sequence.idAtPosition(charPos - 1);
+    node.val = ch;
+    node.tombstone = false;
 
     sequence.insert(node);
 
@@ -83,27 +97,27 @@ void RGAManager::localRemove(int bytePos)
     const int charPos = byteOffsetToCharIndex(utf8, bytePos);
 
     RGAId id = sequence.idAtPosition(charPos);
-
-    if (id.timestamp == 0 && id.siteId == 0) return;
+    if (id.timestamp == 0 && id.siteId == 0)
+        return;
 
     sequence.remove(id);
 
     QJsonObject msg;
     msg["type"] = "delete";
-    msg["id"]   = idToJson(id);
+    msg["id"] = idToJson(id);
     sendMessage(msg);
 
     emit textChanged(sequence.toText());
 }
 
-void RGAManager::remoteInsert(const RGANode& node)
+void RGAManager::remoteInsert(const RGANode &node)
 {
     timestamp = qMax(timestamp, node.id.timestamp) + 1;
     sequence.insert(node);
     emit remoteTextChanged(sequence.toText());
 }
 
-void RGAManager::remoteDelete(const RGAId& id)
+void RGAManager::remoteDelete(const RGAId &id)
 {
     sequence.remove(id);
     emit remoteTextChanged(sequence.toText());
@@ -114,180 +128,138 @@ void RGAManager::onConnected()
     registerWithServer();
     emit connected();
 }
-
 void RGAManager::onDisconnected()
 {
     emit disconnected();
 }
 
-void RGAManager::onMessageReceived(const QString& message)
+void RGAManager::onRawMessage(const QString &message)
 {
     QJsonDocument doc = QJsonDocument::fromJson(message.toUtf8());
-    if (!doc.isObject()) return;
+    if (doc.isObject())
+        processMessage(doc.object());
+}
 
-    QJsonObject obj  = doc.object();
-    QString     type = obj["type"].toString();
+void RGAManager::onError(QAbstractSocket::SocketError)
+{
+    emit errorOccurred(socket->errorString());
+}
+
+void RGAManager::processMessage(const QJsonObject &obj)
+{
+    const QString type = obj["type"].toString();
 
     if (type == "insert") {
-        RGANode node = jsonToNode(obj["node"].toObject());
-        remoteInsert(node);
+        remoteInsert(nodeFromJson(obj["node"].toObject()));
     } else if (type == "delete") {
-        RGAId id = jsonToId(obj["id"].toObject());
-        remoteDelete(id);
-    }
-    else if (type == "snapshot") {
+        remoteDelete(idFromJson(obj["id"].toObject()));
+    } else if (type == "snapshot") {
         QString path = obj["path"].toString();
-        QString filename = QFileInfo(path).fileName();
+        if (path.isEmpty())
+            path = obj["file"].toString();
+        const QString filename = QFileInfo(path).fileName();
+        const QString text = obj["text"].toString();
 
-        if (obj.contains("sequence")) {
-            sequenceFromJson(obj["sequence"].toArray());
-        } else {
-            QString text = obj["text"].toString();
-            buildFromText(text);
-        }
+        buildFromText(text);
 
         emit onInitReceived(sequence.toText(), filename);
-    }
-    else if (type == "cursor") {
-        int sid = obj["siteId"].toInt();
-        int pos = obj["position"].toInt();
+        emit remoteTextChanged(sequence.toText());
+    } else if (type == "cursor") {
+        const int sid = obj["siteId"].toInt();
+        const int pos = obj["position"].toInt();
         if (sid != siteId)
             emit remoteCursorMoved(sid, pos);
-    }
-    else if (type == "cursor_leave") {
-        int sid = obj["siteId"].toInt();
-        emit remoteCursorLeft(sid);
-    }
-    else if (type == "user_list") {
+    } else if (type == "cursor_leave") {
+        emit remoteCursorLeft(obj["siteId"].toInt());
+    } else if (type == "user_list") {
         QJsonArray arr = obj["siteIds"].toArray();
         QList<int> ids;
-        for (const QJsonValue& v : arr)
-            if (!v.isNull()) ids.append(v.toInt());
+        for (const QJsonValue &v : arr)
+            if (!v.isNull())
+                ids.append(v.toInt());
         emit usersUpdated(ids);
     }
 }
 
-void RGAManager::onError(QAbstractSocket::SocketError error)
+RGAId RGAManager::idFromJson(const QJsonObject &obj)
 {
-    Q_UNUSED(error)
-    emit errorOccurred(socket->errorString());
+    return {obj["timestamp"].toInt(), obj["siteId"].toInt()};
 }
 
-QJsonObject RGAManager::idToJson(const RGAId& id) const
-{
-    QJsonObject obj;
-    obj["timestamp"] = id.timestamp;
-    obj["siteId"]    = id.siteId;
-    return obj;
-}
-
-QJsonObject RGAManager::nodeToJson(const RGANode& node)
-{
-    QJsonObject obj;
-    obj["id"]        = idToJson(node.id);
-    obj["parent"]    = idToJson(node.parent);
-    obj["val"]       = QString(node.val);
-    obj["tombstone"] = node.tombstone;
-    return obj;
-}
-
-RGAId RGAManager::jsonToId(const QJsonObject& obj) const
-{
-    RGAId id;
-    id.timestamp = obj["timestamp"].toInt();
-    id.siteId    = obj["siteId"].toInt();
-    return id;
-}
-
-RGANode RGAManager::jsonToNode(const QJsonObject& obj)
+RGANode RGAManager::nodeFromJson(const QJsonObject &obj)
 {
     RGANode node;
-    node.id        = jsonToId(obj["id"].toObject());
-    node.parent    = jsonToId(obj["parent"].toObject());
-    node.val       = obj["val"].toString().isEmpty()
-                   ? QChar() : obj["val"].toString().at(0);
+    node.id = idFromJson(obj["id"].toObject());
+    node.parent = idFromJson(obj["parent"].toObject());
+    const QString v = obj["val"].toString();
+    node.val = v.isEmpty() ? QChar() : v.at(0);
     node.tombstone = obj["tombstone"].toBool();
     return node;
 }
 
-void RGAManager::sendMessage(const QJsonObject& msg)
+QJsonObject RGAManager::idToJson(const RGAId &id) const
 {
-    if (!isConnected()) return;
-    socket->sendTextMessage(
-        QJsonDocument(msg).toJson(QJsonDocument::Compact));
+    QJsonObject obj;
+    obj["timestamp"] = id.timestamp;
+    obj["siteId"] = id.siteId;
+    return obj;
 }
 
-void RGAManager::buildFromText(const QString& text)
+QJsonObject RGAManager::nodeToJson(const RGANode &node) const
 {
-    sequence.clear();
+    QJsonObject obj;
+    obj["id"] = idToJson(node.id);
+    obj["parent"] = idToJson(node.parent);
+    obj["val"] = QString(node.val);
+    obj["tombstone"] = node.tombstone;
+    return obj;
+}
 
+void RGAManager::sendMessage(QJsonObject msg)
+{
+    if (m_sendFn) {
+        if (!m_filePath.isEmpty() && !msg.contains("file"))
+            msg["file"] = m_filePath;
+        m_sendFn(msg);
+        return;
+    }
+    if (!isConnected())
+        return;
+    socket->sendTextMessage(QJsonDocument(msg).toJson(QJsonDocument::Compact));
+}
+
+void RGAManager::buildFromText(const QString &text)
+{
+    sequence.rgaseq.clear();
+    sequence.rgaseq.reserve(text.size());
     timestamp = 0;
 
-    RGAId parent = RGAId{};
+    RGAId parent{};
     for (int i = 0; i < text.size(); ++i) {
         ++timestamp;
-
         RGANode node;
-        node.id.timestamp = timestamp;
-        node.id.siteId    = siteId;
-        node.parent       = parent;
-        node.val          = text[i];
-        node.tombstone    = false;
-
-        sequence.insert(node);
-
+        node.id = {timestamp, 0};
+        node.parent = parent;
+        node.val = text.at(i);
+        node.tombstone = false;
+        sequence.rgaseq.append(node);
         parent = node.id;
     }
 }
 
-void RGAManager::sendInitText(const QString& text, const QString& path)
+void RGAManager::sendInitText(const QString &text, const QString &path)
 {
     QJsonObject msg;
-    msg["type"]     = "snapshot";
-    msg["text"]     = text;
-    msg["path"]     = path;
-    msg["sequence"] = sequenceToJson();
+    msg["type"] = "snapshot";
+    msg["text"] = text;
+    msg["path"] = path;
     sendMessage(msg);
-}
-void RGAManager::debug()
-{
-    for (const RGANode& node : sequence.rgaseq) {
-        qDebug() << "VAL:" << node.val
-                 << "ID:" << node.id.timestamp << node.id.siteId
-                 << "PARENT:" << node.parent.timestamp << node.parent.siteId
-                 << "TOMBSTONE:" << node.tombstone;
-    }
-}
-
-QJsonArray RGAManager::sequenceToJson() const
-{
-    QJsonArray arr;
-    for (const RGANode& node : sequence.rgaseq) {
-        QJsonObject obj;
-        obj["id"]        = idToJson(node.id);
-        obj["parent"]    = idToJson(node.parent);
-        obj["val"]       = QString(node.val);
-        obj["tombstone"] = node.tombstone;
-        arr.append(obj);
-    }
-    return arr;
-}
-
-void RGAManager::sequenceFromJson(const QJsonArray& arr)
-{
-    sequence.clear();
-    timestamp = 0;
-    for (const QJsonValue& val : arr) {
-        RGANode node = jsonToNode(val.toObject());
-        sequence.insert(node);
-        timestamp = qMax(timestamp, node.id.timestamp);
-    }
 }
 
 void RGAManager::registerWithServer()
 {
     QJsonObject msg;
-    msg["type"]   = "register";
+    msg["type"] = "register";
     msg["siteId"] = siteId;
     sendMessage(msg);
 }
@@ -295,8 +267,41 @@ void RGAManager::registerWithServer()
 void RGAManager::sendCursorPosition(int scintillaPos)
 {
     QJsonObject msg;
-    msg["type"]     = "cursor";
-    msg["siteId"]   = siteId;
+    msg["type"] = "cursor";
+    msg["siteId"] = siteId;
     msg["position"] = scintillaPos;
     sendMessage(msg);
+}
+
+QJsonArray RGAManager::sequenceToJson() const
+{
+    QJsonArray arr;
+    for (const RGANode &node : sequence.rgaseq) {
+        QJsonObject obj;
+        obj["id"] = idToJson(node.id);
+        obj["parent"] = idToJson(node.parent);
+        obj["val"] = QString(node.val);
+        obj["tombstone"] = node.tombstone;
+        arr.append(obj);
+    }
+    return arr;
+}
+
+void RGAManager::sequenceFromJson(const QJsonArray &arr)
+{
+    sequence.clear();
+    timestamp = 0;
+    for (const QJsonValue &val : arr) {
+        RGANode node = nodeFromJson(val.toObject());
+        sequence.insert(node);
+        timestamp = qMax(timestamp, node.id.timestamp);
+    }
+}
+
+void RGAManager::debug()
+{
+    for (const RGANode &node : sequence.rgaseq)
+        qDebug() << "VAL:" << node.val << "ID:" << node.id.timestamp << node.id.siteId
+                 << "PARENT:" << node.parent.timestamp << node.parent.siteId
+                 << "TOMBSTONE:" << node.tombstone;
 }

@@ -12,6 +12,7 @@ win32 {
 }
 
 SOURCES += \
+    src/collab/collabsession.cpp \
     src/editor/codeeditor.cpp \
     src/editor/textsearch.cpp \
     src/filebrowser/filebrowser.cpp \
@@ -23,13 +24,14 @@ SOURCES += \
     src/voicechat/voicechat.cpp
 
 HEADERS += \
-    src/crdt/rganode.h \
-    src/crdt/rgaseq.h \
+    src/collab/collabsession.h \
     src/editor/codeeditor.h \
     src/editor/textsearch.h \
     src/filebrowser/filebrowser.h \
     src/mainwindow.h \
+    src/rga/rganode.h \
     src/rga/rgamanager.h \
+    src/rga/rgaseq.h \
     src/terminal/terminal.h \
     src/voicechat/voicechat.h
 

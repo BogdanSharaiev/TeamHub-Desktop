@@ -18,8 +18,9 @@
 class RemoteCursorOverlay : public QWidget
 {
 public:
-    explicit RemoteCursorOverlay(CodeEditor* editor)
-        : QWidget(editor->viewport()), ed(editor)
+    explicit RemoteCursorOverlay(CodeEditor *editor)
+        : QWidget(editor->viewport())
+        , ed(editor)
     {
         setAttribute(Qt::WA_TransparentForMouseEvents);
         setAttribute(Qt::WA_NoSystemBackground);
@@ -30,10 +31,10 @@ public:
     }
 
 protected:
-    void paintEvent(QPaintEvent*) override { ed->paintRemoteCursors(this); }
+    void paintEvent(QPaintEvent *) override { ed->paintRemoteCursors(this); }
 
 private:
-    CodeEditor* ed;
+    CodeEditor *ed;
 };
 
 static const QList<QPair<QChar, QChar>> kAutoPairs = {
@@ -150,10 +151,14 @@ void CodeEditor::setupEditor()
 
     cursorOverlay = new RemoteCursorOverlay(this);
 
-    connect(verticalScrollBar(),   &QScrollBar::valueChanged,
-            cursorOverlay, QOverload<>::of(&QWidget::update));
-    connect(horizontalScrollBar(), &QScrollBar::valueChanged,
-            cursorOverlay, QOverload<>::of(&QWidget::update));
+    connect(verticalScrollBar(),
+            &QScrollBar::valueChanged,
+            cursorOverlay,
+            QOverload<>::of(&QWidget::update));
+    connect(horizontalScrollBar(),
+            &QScrollBar::valueChanged,
+            cursorOverlay,
+            QOverload<>::of(&QWidget::update));
 }
 
 void CodeEditor::onCursorChanged(int line, int index)
@@ -216,12 +221,14 @@ void CodeEditor::keyPressEvent(QKeyEvent *event)
                 QChar sendChar = (ch == '\r') ? QChar('\n') : ch;
                 QsciScintilla::keyPressEvent(event);
                 emit localInsert(pos, sendChar);
+                shiftRemoteCursors(pos, QString(sendChar).toUtf8().size());
 
                 if (sendChar == '\n') {
                     int newPos = SendScintilla(SCI_GETCURRENTPOS);
                     int indentLen = newPos - (pos + 1);
                     for (int i = 0; i < indentLen; i++) {
                         emit localInsert(pos + 1 + i, QChar(' '));
+                        shiftRemoteCursors(pos + 1 + i, 1);
                     }
                 }
                 return;
@@ -231,16 +238,22 @@ void CodeEditor::keyPressEvent(QKeyEvent *event)
         if (key == Qt::Key_Backspace && mod == Qt::NoModifier) {
             int pos = SendScintilla(SCI_GETCURRENTPOS);
             if (pos > 0) {
+                const int prevPos = (int) SendScintilla(SCI_POSITIONBEFORE, (ulong) pos);
+                const int byteLen = pos - prevPos;
                 QsciScintilla::keyPressEvent(event);
                 emit localDelete(pos - 1);
+                shiftRemoteCursors(prevPos, -byteLen);
                 return;
             }
         }
 
         if (key == Qt::Key_Delete && mod == Qt::NoModifier) {
             int pos = SendScintilla(SCI_GETCURRENTPOS);
+            const int nextPos = (int) SendScintilla(SCI_POSITIONAFTER, (ulong) pos);
+            const int byteLen = nextPos - pos;
             QsciScintilla::keyPressEvent(event);
             emit localDelete(pos);
+            shiftRemoteCursors(pos, -byteLen);
             return;
         }
     }
@@ -279,6 +292,8 @@ bool CodeEditor::autoCloseChar(QKeyEvent *event)
 
             emit localInsert(pos, open);
             emit localInsert(pos + 1, close);
+            shiftRemoteCursors(pos, 1);
+            shiftRemoteCursors(pos + 1, 1);
         }
         return true;
     }
@@ -332,6 +347,7 @@ bool CodeEditor::handleBackspaceInPair(QKeyEvent *event)
             removeSelectedText();
             emit localDelete(pos);
             emit localDelete(pos - 1);
+            shiftRemoteCursors(pos - 1, -2);
             return true;
         }
     }
@@ -427,12 +443,7 @@ void CodeEditor::checkSyntax()
             &CodeEditor::onLintFinished);
 
     lintProcess->start("python",
-                       {"-m",
-                        "ruff",
-                        "check",
-                        "--output-format=concise",
-                        "--select=E,F,W",
-                        tmpPath});
+                       {"-m", "ruff", "check", "--output-format=concise", "--select=E,F,W", tmpPath});
 
     if (!lintProcess->waitForStarted(3000)) {
         delete lintProcess;
@@ -497,9 +508,7 @@ void CodeEditor::mouseMoveEvent(QMouseEvent *event)
 {
     QsciScintilla::mouseMoveEvent(event);
 
-    const int pos = SendScintilla(SCI_POSITIONFROMPOINT,
-                                  event->pos().x(),
-                                  event->pos().y());
+    const int pos = SendScintilla(SCI_POSITIONFROMPOINT, event->pos().x(), event->pos().y());
 
     const int indicators = SendScintilla(SCI_INDICATORALLONFOR, pos);
 
@@ -507,11 +516,12 @@ void CodeEditor::mouseMoveEvent(QMouseEvent *event)
         int line, col;
         lineIndexFromPosition(pos, &line, &col);
 
-        const ErrorInfo* closest = nullptr;
+        const ErrorInfo *closest = nullptr;
         int minDist = INT_MAX;
 
-        for (const ErrorInfo& err : std::as_const(errorList)) {
-            if (err.line != line) continue;
+        for (const ErrorInfo &err : std::as_const(errorList)) {
+            if (err.line != line)
+                continue;
 
             int dist = std::abs(col - err.col);
             if (dist < minDist) {
@@ -521,10 +531,7 @@ void CodeEditor::mouseMoveEvent(QMouseEvent *event)
         }
 
         if (closest) {
-            QToolTip::showText(
-                event->globalPosition().toPoint(),
-                closest->message,
-                this);
+            QToolTip::showText(event->globalPosition().toPoint(), closest->message, this);
             return;
         }
     }
@@ -717,7 +724,7 @@ void CodeEditor::applyRemoteText(const QString &newText)
     blockSignals(true);
     int curLine = 0, curCol = 0;
     getCursorPosition(&curLine, &curCol);
-    const int firstVisLine = (int)SendScintilla(SCI_GETFIRSTVISIBLELINE);
+    const int firstVisLine = (int) SendScintilla(SCI_GETFIRSTVISIBLELINE);
 
     setText(newText);
 
@@ -726,9 +733,10 @@ void CodeEditor::applyRemoteText(const QString &newText)
         curLine = qMax(0, totalLines - 1);
     setCursorPosition(curLine, curCol);
 
-    SendScintilla(SCI_SETFIRSTVISIBLELINE, (ulong)firstVisLine);
+    SendScintilla(SCI_SETFIRSTVISIBLELINE, (ulong) firstVisLine);
 
-    if (cursorOverlay) cursorOverlay->update();
+    if (cursorOverlay)
+        cursorOverlay->update();
 
     blockSignals(false);
     applyingRemote = false;
@@ -880,27 +888,53 @@ void CodeEditor::selectCurrentMatch(const QString &searchText)
     textSearch->updateMatchLabel(searchCurrentIndex + 1, searchMatches.size());
 }
 
+void CodeEditor::shiftRemoteCursors(int fromBytePos, int byteDelta)
+{
+    if (remoteCursorPositions.isEmpty())
+        return;
+    bool changed = false;
+    for (auto it = remoteCursorPositions.begin(); it != remoteCursorPositions.end(); ++it) {
+        if (byteDelta > 0) {
+            if (it.value() >= fromBytePos) {
+                it.value() += byteDelta;
+                changed = true;
+            }
+        } else {
+            if (it.value() > fromBytePos) {
+                it.value() = qMax(fromBytePos, it.value() + byteDelta);
+                changed = true;
+            }
+        }
+    }
+    if (changed && cursorOverlay)
+        cursorOverlay->update();
+}
+
 void CodeEditor::updateRemoteCursor(int siteId, int scintillaPos)
 {
     remoteCursorPositions[siteId] = scintillaPos;
-    if (cursorOverlay) cursorOverlay->update();
+    if (cursorOverlay)
+        cursorOverlay->update();
 }
 
 void CodeEditor::removeRemoteCursor(int siteId)
 {
     remoteCursorPositions.remove(siteId);
-    if (cursorOverlay) cursorOverlay->update();
+    if (cursorOverlay)
+        cursorOverlay->update();
 }
 
 void CodeEditor::clearRemoteCursors()
 {
     remoteCursorPositions.clear();
-    if (cursorOverlay) cursorOverlay->update();
+    if (cursorOverlay)
+        cursorOverlay->update();
 }
 
-void CodeEditor::paintRemoteCursors(QWidget* overlay)
+void CodeEditor::paintRemoteCursors(QWidget *overlay)
 {
-    if (remoteCursorPositions.isEmpty()) return;
+    if (remoteCursorPositions.isEmpty())
+        return;
 
     QPainter painter(overlay);
     painter.setRenderHint(QPainter::Antialiasing, false);
@@ -910,19 +944,19 @@ void CodeEditor::paintRemoteCursors(QWidget* overlay)
     painter.setFont(labelFont);
     QFontMetrics fm(labelFont);
 
-    for (auto it = remoteCursorPositions.constBegin();
-         it != remoteCursorPositions.constEnd(); ++it)
-    {
+    for (auto it = remoteCursorPositions.constBegin(); it != remoteCursorPositions.constEnd();
+         ++it) {
         const int siteId = it.key();
         const int sciPos = it.value();
         const QColor color = kCursorColors[std::abs(siteId) % 4];
 
-        const int x = (int)SendScintilla(SCI_POINTXFROMPOSITION, 0UL, (long)sciPos);
-        const int y = (int)SendScintilla(SCI_POINTYFROMPOSITION, 0UL, (long)sciPos);
-        const int line       = (int)SendScintilla(SCI_LINEFROMPOSITION, (ulong)sciPos);
-        const int lineHeight = (int)SendScintilla(SCI_TEXTHEIGHT, (ulong)line);
+        const int x = (int) SendScintilla(SCI_POINTXFROMPOSITION, 0UL, (long) sciPos);
+        const int y = (int) SendScintilla(SCI_POINTYFROMPOSITION, 0UL, (long) sciPos);
+        const int line = (int) SendScintilla(SCI_LINEFROMPOSITION, (ulong) sciPos);
+        const int lineHeight = (int) SendScintilla(SCI_TEXTHEIGHT, (ulong) line);
 
-        if (y + lineHeight < 0 || y > overlay->height()) continue;
+        if (y + lineHeight < 0 || y > overlay->height())
+            continue;
 
         painter.setPen(QPen(color, 2));
         painter.drawLine(x, y, x, y + lineHeight);
@@ -935,8 +969,7 @@ void CodeEditor::paintRemoteCursors(QWidget* overlay)
         if (labelY >= 0) {
             painter.fillRect(x, labelY, labelW, labelH, color);
             painter.setPen(Qt::white);
-            painter.drawText(QRect(x, labelY, labelW, labelH),
-                             Qt::AlignCenter, label);
+            painter.drawText(QRect(x, labelY, labelW, labelH), Qt::AlignCenter, label);
         }
     }
 }
