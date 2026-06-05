@@ -931,6 +931,21 @@ void CodeEditor::clearRemoteCursors()
         cursorOverlay->update();
 }
 
+int CodeEditor::remoteCursorPos(int siteId) const
+{
+    return remoteCursorPositions.value(siteId, -1);
+}
+
+void CodeEditor::goToScintillaPos(int pos)
+{
+    if (pos < 0)
+        return;
+    int line = (int)SendScintilla(SCI_LINEFROMPOSITION, (ulong)pos);
+    int col  = (int)SendScintilla(SCI_GETCOLUMN, (ulong)pos);
+    setCursorPosition(line, col);
+    ensureLineVisible(line);
+}
+
 void CodeEditor::paintRemoteCursors(QWidget *overlay)
 {
     if (remoteCursorPositions.isEmpty())

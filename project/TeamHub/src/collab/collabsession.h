@@ -17,6 +17,7 @@ class CollabSession : public QObject
     Q_OBJECT
 public:
     enum class Role { Host, Guest };
+    enum class Mode { ReadWrite, ReadOnly };
 
     explicit CollabSession(int siteId, Role role, QObject *parent = nullptr);
     ~CollabSession() override;
@@ -35,18 +36,25 @@ public:
     void notifyFileCreated(const QString &relPath, const QString &text = {});
     void notifyFileDeleted(const QString &relPath);
     void notifyFileRenamed(const QString &oldPath, const QString &newPath);
+    void sendCursorLeave(const QString &relPath);
+    void sendFileFocus(const QString &relPath);
+    void kickUser(int siteId);
 
     Role role() const { return role_; }
+    Mode collabMode() const { return mode_; }
+    void setCollabMode(Mode m) { mode_ = m; }
     int siteId() const { return siteId_; }
     QStringList fileList() const { return fileList_; }
     QString projectRoot() const { return projectRoot_; }
 
     bool hasTextCache(const QString &relPath) const { return textCache.contains(relPath); }
     QString cachedText(const QString &relPath) const { return textCache.value(relPath); }
+    QMap<int, int> fileCursors(const QString &relPath) const { return cursorCache.value(relPath); }
 
 signals:
     void connected();
     void disconnected();
+    void kicked();
     void errorOccurred(const QString &err);
     void projectInitReceived(int hostSiteId, const QStringList &files);
     void runOutputReceived(const QString &text);
@@ -54,6 +62,7 @@ signals:
     void remoteFileCreated(const QString &relPath);
     void remoteFileDeleted(const QString &relPath);
     void remoteFileRenamed(const QString &oldPath, const QString &newPath);
+    void remoteFileFocusChanged(int siteId, const QString &file);
 
 private slots:
     void onConnected();
@@ -79,6 +88,7 @@ private:
     QWebSocket *socket;
     int siteId_;
     Role role_;
+    Mode mode_ = Mode::ReadWrite;
     QString projectRoot_;
     QStringList fileList_;
 
@@ -86,6 +96,7 @@ private:
     QMap<QString, FileState> fileStates;
     QMap<QString, QString> textCache;
     QMap<QString, QDateTime> lastUsed;
+    QMap<QString, QMap<int, int>> cursorCache;
 };
 
 #endif // COLLABSESSION_H

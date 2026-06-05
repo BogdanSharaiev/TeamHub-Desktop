@@ -75,7 +75,7 @@ private:
     QString currentFilePath;
 
     // Collaboration
-    CollabSession *m_session = nullptr;
+    CollabSession *session = nullptr;
     QListWidget *collabUsersList = nullptr;
     QLabel *collabStatusLabel = nullptr;
     QPushButton *btnStopAllCollab = nullptr;
@@ -83,6 +83,9 @@ private:
     QPushButton *btnJoinCollab = nullptr;
     QWidget *collabNoSessionPane = nullptr;
     QWidget *collabInSessionPane = nullptr;
+    QMap<int, QString> peerFiles;
+    QList<int> peerSiteIds;
+    QString currentCollabFile;
 
     // Voice
     VoiceChat *voiceChat;
@@ -131,6 +134,8 @@ private:
     QString toSessionKey(const QString &editorPath) const;
 
     void onCollabUsersUpdated(QList<int> siteIds);
+    void onRemoteFileFocusChanged(int siteId, const QString &file);
+    void refreshCollabUsersList();
 
 private slots:
     void onActivityButton(int page);
@@ -151,8 +156,11 @@ private slots:
     void toggleBottomDock();
     void toggleVoipDock();
 
-    void startCollab(const QString &room);
+    void startCollab(const QString &room,
+                     CollabSession::Mode mode = CollabSession::Mode::ReadWrite,
+                     const QStringList &selectedFiles = {});
     void joinCollab();
+    bool showStartCollabDialog();
 
     void onSessionProjectInit(int hostSiteId, const QStringList &files);
     void onSessionRunOutput(const QString &text);
@@ -165,6 +173,8 @@ private slots:
     void onVoipPeerConnected(const QString &ip, quint16 port);
     void onVoipPeerDisconnected(const QString &ip, quint16 port);
     void onVoipPeersUpdated(const QStringList &ids);
+
+    void onCollabUserContextMenu(const QPoint &pos);
 };
 
 #endif // MAINWINDOW_H

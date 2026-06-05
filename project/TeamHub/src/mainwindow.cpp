@@ -1,25 +1,32 @@
 #include "mainwindow.h"
 
 #include <QApplication>
+#include <QButtonGroup>
 #include <QCloseEvent>
+#include <QDialog>
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFrame>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QLineEdit>
+#include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QProcess>
+#include <QRadioButton>
 #include <QRandomGenerator>
 #include <QSizePolicy>
 #include <QStatusBar>
 #include <QTimer>
 #include <QToolBar>
+#include <QTreeWidget>
 #include <QVBoxLayout>
+#include <functional>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -245,20 +252,10 @@ void MainWindow::setupMainToolBar()
 
     auto *actCollab = tb->addAction("Collab");
     actCollab->setCheckable(true);
-    connect(actCollab, &QAction::triggered, this, [this](bool checked) {
+    connect(actCollab, &QAction::triggered, this, [this, actCollab](bool checked) {
         if (checked) {
-            bool ok;
-            QString room = QInputDialog::getText(this,
-                                                 "Join Collaboration",
-                                                 "Enter room name:",
-                                                 QLineEdit::Normal,
-                                                 "",
-                                                 &ok);
-            if (!ok || room.isEmpty()) {
-                qobject_cast<QAction *>(sender())->setChecked(false);
-                return;
-            }
-            startCollab(room);
+            if (!showStartCollabDialog())
+                actCollab->setChecked(false);
         } else {
             stopAllCollab();
         }
@@ -269,13 +266,16 @@ void MainWindow::setupMainToolBar()
     connect(actCall, &QAction::triggered, this, &MainWindow::toggleVoipDock);
 }
 
-void MainWindow::startCollab(const QString &room)
+void MainWindow::startCollab(const QString &room,
+                              CollabSession::Mode mode,
+                              const QStringList &selectedFiles)
 {
     stopAllCollab();
 
     const int siteId = static_cast<int>(QRandomGenerator::global()->bounded(100000u, 999999u));
 
-    m_session = new CollabSession(siteId, CollabSession::Role::Host, this);
+    session = new CollabSession(siteId, CollabSession::Role::Host, this);
+    session->setCollabMode(mode);
 
     const QString projectRoot = fileBrowser->rootPath();
 
@@ -308,10 +308,20 @@ void MainWindow::startCollab(const QString &room)
         fileTexts[relPath] = ed->text();
     }
 
-    for (auto it = fileTexts.cbegin(); it != fileTexts.cend(); ++it)
-        m_session->initFileCache(it.key(), it.value());
+    if (!selectedFiles.isEmpty()) {
+        QStringList filtered;
+        for (const QString &p : std::as_const(allRelPaths))
+            if (selectedFiles.contains(p))
+                filtered.append(p);
+        allRelPaths = filtered;
+        for (auto jt = fileTexts.begin(); jt != fileTexts.end(); )
+            jt = selectedFiles.contains(jt.key()) ? ++jt : fileTexts.erase(jt);
+    }
 
-    m_session->setProject(projectRoot, allRelPaths);
+    for (auto it = fileTexts.cbegin(); it != fileTexts.cend(); ++it)
+        session->initFileCache(it.key(), it.value());
+
+    session->setProject(projectRoot, allRelPaths);
 
     for (int i = 0; i < editorTabs->count(); ++i) {
         auto *ed = qobject_cast<CodeEditor *>(editorTabs->widget(i));
@@ -325,22 +335,32 @@ void MainWindow::startCollab(const QString &room)
         markTabAsCollab(ed, true);
     }
 
-    connect(m_session, &CollabSession::usersUpdated, this, &MainWindow::onCollabUsersUpdated);
-    connect(m_session, &CollabSession::projectInitReceived, this, &MainWindow::onSessionProjectInit);
-    connect(m_session, &CollabSession::runOutputReceived, this, &MainWindow::onSessionRunOutput);
-    connect(m_session, &CollabSession::remoteFileCreated, this, &MainWindow::onSessionFileCreated);
-    connect(m_session, &CollabSession::remoteFileDeleted, this, &MainWindow::onSessionFileDeleted);
-    connect(m_session, &CollabSession::remoteFileRenamed, this, &MainWindow::onSessionFileRenamed);
-    connect(m_session, &CollabSession::errorOccurred, this, [this](const QString &err) {
+    connect(session, &CollabSession::usersUpdated, this, &MainWindow::onCollabUsersUpdated);
+    connect(session, &CollabSession::projectInitReceived, this, &MainWindow::onSessionProjectInit);
+    connect(session, &CollabSession::runOutputReceived, this, &MainWindow::onSessionRunOutput);
+    connect(session, &CollabSession::remoteFileCreated, this, &MainWindow::onSessionFileCreated);
+    connect(session, &CollabSession::remoteFileDeleted, this, &MainWindow::onSessionFileDeleted);
+    connect(session, &CollabSession::remoteFileRenamed, this, &MainWindow::onSessionFileRenamed);
+    connect(session,
+            &CollabSession::remoteFileFocusChanged,
+            this,
+            &MainWindow::onRemoteFileFocusChanged);
+    connect(session, &CollabSession::errorOccurred, this, [this](const QString &err) {
         outputPane->appendPlainText("[Collab] Error: " + err);
+    });
+    connect(session, &CollabSession::kicked, this, [this]() {
+        QTimer::singleShot(0, this, [this]() {
+            stopAllCollab();
+            QMessageBox::information(this, "Collab", "You were kicked from the session.");
+        });
     });
 
     connect(
-        m_session,
+        session,
         &CollabSession::connected,
         this,
         [this, fileTexts]() {
-            m_session->sendAllSnapshots(fileTexts);
+            session->sendAllSnapshots(fileTexts);
             outputPane->appendPlainText("[Collab] Project session started — you are host");
             if (collabStatusLabel)
                 collabStatusLabel->setText("Hosting");
@@ -348,10 +368,18 @@ void MainWindow::startCollab(const QString &room)
                 collabNoSessionPane->hide();
             if (collabInSessionPane)
                 collabInSessionPane->show();
+            const QString path = editor ? editor->getFilePath() : QString();
+            if (!path.isEmpty()) {
+                const QString relPath = toSessionKey(path);
+                currentCollabFile = relPath;
+                session->sendFileFocus(relPath);
+                peerFiles[session->siteId()] = relPath;
+                refreshCollabUsersList();
+            }
         },
         Qt::SingleShotConnection);
 
-    m_session->connectToServer(QString("ws://localhost:8765/%1").arg(room));
+    session->connectToServer(QString("ws://localhost:8765/%1").arg(room));
     outputPane->appendPlainText("[Collab] Starting room: " + room);
 }
 
@@ -372,19 +400,29 @@ void MainWindow::joinCollab()
 
     const int siteId = static_cast<int>(QRandomGenerator::global()->bounded(100000u, 999999u));
 
-    m_session = new CollabSession(siteId, CollabSession::Role::Guest, this);
+    session = new CollabSession(siteId, CollabSession::Role::Guest, this);
 
-    connect(m_session, &CollabSession::projectInitReceived, this, &MainWindow::onSessionProjectInit);
-    connect(m_session, &CollabSession::runOutputReceived, this, &MainWindow::onSessionRunOutput);
-    connect(m_session, &CollabSession::usersUpdated, this, &MainWindow::onCollabUsersUpdated);
-    connect(m_session, &CollabSession::remoteFileCreated, this, &MainWindow::onSessionFileCreated);
-    connect(m_session, &CollabSession::remoteFileDeleted, this, &MainWindow::onSessionFileDeleted);
-    connect(m_session, &CollabSession::remoteFileRenamed, this, &MainWindow::onSessionFileRenamed);
-    connect(m_session, &CollabSession::errorOccurred, this, [this](const QString &err) {
+    connect(session, &CollabSession::projectInitReceived, this, &MainWindow::onSessionProjectInit);
+    connect(session, &CollabSession::runOutputReceived, this, &MainWindow::onSessionRunOutput);
+    connect(session, &CollabSession::usersUpdated, this, &MainWindow::onCollabUsersUpdated);
+    connect(session, &CollabSession::remoteFileCreated, this, &MainWindow::onSessionFileCreated);
+    connect(session, &CollabSession::remoteFileDeleted, this, &MainWindow::onSessionFileDeleted);
+    connect(session, &CollabSession::remoteFileRenamed, this, &MainWindow::onSessionFileRenamed);
+    connect(session,
+            &CollabSession::remoteFileFocusChanged,
+            this,
+            &MainWindow::onRemoteFileFocusChanged);
+    connect(session, &CollabSession::errorOccurred, this, [this](const QString &err) {
         outputPane->appendPlainText("[Collab] Error: " + err);
     });
+    connect(session, &CollabSession::kicked, this, [this]() {
+        QTimer::singleShot(0, this, [this]() {
+            stopAllCollab();
+            QMessageBox::information(this, "Collab", "You were kicked from the session.");
+        });
+    });
     connect(
-        m_session,
+        session,
         &CollabSession::connected,
         this,
         [this]() {
@@ -398,7 +436,7 @@ void MainWindow::joinCollab()
         },
         Qt::SingleShotConnection);
 
-    m_session->connectToServer(QString("ws://localhost:8765/%1").arg(room));
+    session->connectToServer(QString("ws://localhost:8765/%1").arg(room));
     outputPane->appendPlainText("[Collab] Joining room: " + room);
 }
 
@@ -412,7 +450,7 @@ void MainWindow::wireEditorToManager(CodeEditor *ed, RGAManager *mgr)
         ed->applyRemoteText(newText);
     });
 
-    connect(ed, &CodeEditor::cursorPositionUpdated, ed, [mgr, ed](int, int) {
+    connect(ed, &CodeEditor::cursorPositionUpdated, mgr, [mgr, ed](int, int) {
         mgr->sendCursorPosition(ed->SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS));
     });
 
@@ -437,21 +475,29 @@ void MainWindow::wireEditorToManager(CodeEditor *ed, RGAManager *mgr)
 
 void MainWindow::wireEditorToSession(CodeEditor *ed, const QString &relPath)
 {
-    RGAManager *mgr = m_session->getOrCreateRGA(relPath);
+    RGAManager *mgr = session->getOrCreateRGA(relPath);
     wireEditorToManager(ed, mgr);
+
+    const auto cached = session->fileCursors(relPath);
+    for (auto it = cached.cbegin(); it != cached.cend(); ++it)
+        ed->updateRemoteCursor(it.key(), it.value());
+
+    if (session->role() == CollabSession::Role::Guest
+        && session->collabMode() == CollabSession::Mode::ReadOnly)
+        ed->setReadOnly(true);
 }
 
 QString MainWindow::toSessionKey(const QString &editorPath) const
 {
-    if (!m_session || m_session->role() == CollabSession::Role::Guest)
+    if (!session || session->role() == CollabSession::Role::Guest)
         return editorPath;
-    const QString root = m_session->projectRoot();
+    const QString root = session->projectRoot();
     return root.isEmpty() ? editorPath : QDir(root).relativeFilePath(editorPath);
 }
 
 void MainWindow::stopAllCollab()
 {
-    if (!m_session)
+    if (!session)
         return;
 
     for (int i = 0; i < editorTabs->count(); ++i) {
@@ -462,9 +508,13 @@ void MainWindow::stopAllCollab()
         markTabAsCollab(ed, false);
     }
 
-    m_session->disconnectFromServer();
-    m_session->deleteLater();
-    m_session = nullptr;
+    session->disconnectFromServer();
+    session->deleteLater();
+    session = nullptr;
+
+    peerFiles.clear();
+    peerSiteIds.clear();
+    currentCollabFile.clear();
 
     if (collabUsersList)
         collabUsersList->clear();
@@ -490,22 +540,43 @@ void MainWindow::markTabAsCollab(CodeEditor *ed, bool on)
     if (name.isEmpty())
         name = "Untitled";
 
-    editorTabs->setTabText(idx, on ? (QString::fromUtf8("⚡ ") + name) : name);
+    editorTabs->setTabText(idx, on ? (QString::fromUtf8("◎ ") + name) : name);
+}
+
+void MainWindow::refreshCollabUsersList()
+{
+    if (!collabUsersList || !session)
+        return;
+    collabUsersList->clear();
+    for (int id : peerSiteIds) {
+        QString label = QString("User #%1").arg(id);
+        if (id == session->siteId())
+            label += " (you)";
+        const QString f = peerFiles.value(id);
+        if (!f.isEmpty())
+            label += QString("  [%1]").arg(QFileInfo(f).fileName());
+        auto *item = new QListWidgetItem(label);
+        item->setData(Qt::UserRole, id);
+        collabUsersList->addItem(item);
+    }
 }
 
 void MainWindow::onCollabUsersUpdated(QList<int> siteIds)
 {
-    if (!collabUsersList)
-        return;
-    collabUsersList->clear();
-    for (int id : siteIds)
-        collabUsersList->addItem(QString("User #%1").arg(id));
+    peerSiteIds = siteIds;
+    refreshCollabUsersList();
     if (collabStatusLabel && !siteIds.isEmpty()) {
-        const QString role = (m_session && m_session->role() == CollabSession::Role::Host)
+        const QString role = (session && session->role() == CollabSession::Role::Host)
                                  ? "Hosting"
                                  : "Guest";
         collabStatusLabel->setText(QString("%1 — %2 user(s)").arg(role).arg(siteIds.size()));
     }
+}
+
+void MainWindow::onRemoteFileFocusChanged(int siteId, const QString &file)
+{
+    peerFiles[siteId] = file;
+    refreshCollabUsersList();
 }
 
 void MainWindow::onTabCloseRequested(int tabIndex)
@@ -517,16 +588,16 @@ void MainWindow::onTabCloseRequested(int tabIndex)
     if (!tabEditor)
         return;
 
-    if (m_session) {
+    if (session) {
         const QString relPath = toSessionKey(tabEditor->getFilePath());
-        if (m_session->hasActiveRGA(relPath)) {
+        if (session->hasActiveRGA(relPath)) {
             tabEditor->clearRemoteCursors();
-            m_session->releaseRGA(relPath);
+            session->releaseRGA(relPath);
         }
         markTabAsCollab(tabEditor, false);
     }
 
-    if (tabEditor->isModified() && !(m_session && m_session->role() == CollabSession::Role::Guest)) {
+    if (tabEditor->isModified() && !(session && session->role() == CollabSession::Role::Guest)) {
         const auto btn = QMessageBox::question(this,
                                                "Unsaved Changes",
                                                "Save changes before closing this tab?",
@@ -690,18 +761,7 @@ void MainWindow::setupLeftPanel()
 
     btnStartCollab = new QPushButton("Start Collab");
     btnStartCollab->setObjectName("voipBtn");
-    connect(btnStartCollab, &QPushButton::clicked, this, [this]() {
-        bool ok;
-        QString room = QInputDialog::getText(this,
-                                             "Start Collaboration",
-                                             "Enter room name:",
-                                             QLineEdit::Normal,
-                                             "",
-                                             &ok);
-        if (!ok || room.isEmpty())
-            return;
-        startCollab(room);
-    });
+    connect(btnStartCollab, &QPushButton::clicked, this, [this]() { showStartCollabDialog(); });
     noVl->addWidget(btnStartCollab);
 
     btnJoinCollab = new QPushButton("Join Collab");
@@ -723,6 +783,11 @@ void MainWindow::setupLeftPanel()
 
     collabUsersList = new QListWidget;
     collabUsersList->setObjectName("taskList");
+    collabUsersList->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(collabUsersList,
+            &QListWidget::customContextMenuRequested,
+            this,
+            &MainWindow::onCollabUserContextMenu);
     inVl->addWidget(collabUsersList, 1);
 
     btnStopAllCollab = new QPushButton("End Collab");
@@ -750,17 +815,17 @@ void MainWindow::openFileFromBrowser(const QString &path)
 
     CodeEditor *newEditor = new CodeEditor(editorTabs);
 
-    const bool isGuest = m_session && m_session->role() == CollabSession::Role::Guest;
+    const bool isGuest = session && session->role() == CollabSession::Role::Guest;
 
     if (isGuest) {
         newEditor->setFilePath(path);
-        const QString cached = m_session->cachedText(path);
+        const QString cached = session->cachedText(path);
         if (!cached.isEmpty())
             newEditor->applyRemoteText(cached);
-    } else if (m_session) {
+    } else if (session) {
         const QString relPath = toSessionKey(path);
         newEditor->setFilePath(path);
-        const QString cached = m_session->cachedText(relPath);
+        const QString cached = session->cachedText(relPath);
         if (!cached.isEmpty())
             newEditor->applyRemoteText(cached);
         else
@@ -779,15 +844,15 @@ void MainWindow::openFileFromBrowser(const QString &path)
     const int tabIdx = editorTabs->addTab(newEditor, name);
     editorTabs->setCurrentIndex(tabIdx);
 
-    if (m_session) {
+    if (session) {
         const QString relPath = toSessionKey(path);
-        if (!isGuest && !m_session->hasTextCache(relPath))
-            m_session->initFileCache(relPath, newEditor->text());
+        if (!isGuest && !session->hasTextCache(relPath))
+            session->initFileCache(relPath, newEditor->text());
 
         wireEditorToSession(newEditor, relPath);
 
         if (!isGuest) {
-            RGAManager *mgr = m_session->getOrCreateRGA(relPath);
+            RGAManager *mgr = session->getOrCreateRGA(relPath);
             if (mgr->getText().isEmpty()) {
                 mgr->buildFromText(newEditor->text());
                 mgr->sendInitText(newEditor->text(), relPath);
@@ -965,6 +1030,21 @@ void MainWindow::onTabChanged(int index)
                                 .arg(activeEditor->currentLine() + 1)
                                 .arg(activeEditor->currentColumn() + 1));
     updateWindowTitle();
+
+    if (session && session->isConnected()) {
+        if (!currentCollabFile.isEmpty())
+            session->sendCursorLeave(currentCollabFile);
+
+        const QString relPath = toSessionKey(path);
+        if (!path.isEmpty()) {
+            currentCollabFile = relPath;
+            session->sendFileFocus(relPath);
+            peerFiles[session->siteId()] = relPath;
+            refreshCollabUsersList();
+        } else {
+            currentCollabFile.clear();
+        }
+    }
 }
 
 void MainWindow::applyTheme()
@@ -1291,7 +1371,7 @@ void MainWindow::onModificationChanged(bool modified)
 
 void MainWindow::runFile()
 {
-    if (m_session && m_session->role() == CollabSession::Role::Guest) {
+    if (session && session->role() == CollabSession::Role::Guest) {
         bottomTabs->setCurrentWidget(outputPane);
         bottomDock->setVisible(true);
         outputPane->appendPlainText("[Collab] Code execution is controlled by the host.");
@@ -1324,8 +1404,8 @@ void MainWindow::runFile()
     connect(proc, &QProcess::readyReadStandardOutput, this, [this, proc]() {
         const QString chunk = QString::fromLocal8Bit(proc->readAllStandardOutput());
         outputPane->appendPlainText(chunk);
-        if (m_session)
-            m_session->broadcastRunOutput(chunk);
+        if (session)
+            session->broadcastRunOutput(chunk);
     });
 
     connect(proc,
@@ -1334,8 +1414,8 @@ void MainWindow::runFile()
             [this, proc](int code, QProcess::ExitStatus) {
                 const QString msg = QString("\n[TeamHub] Exit code: %1").arg(code);
                 outputPane->appendPlainText(msg);
-                if (m_session)
-                    m_session->broadcastRunOutput(msg);
+                if (session)
+                    session->broadcastRunOutput(msg);
                 proc->deleteLater();
             });
 
@@ -1549,10 +1629,18 @@ void MainWindow::addRoom(const QString &room)
 
 void MainWindow::onSessionProjectInit(int /*hostSiteId*/, const QStringList &files)
 {
-    outputPane->appendPlainText(QString("[Collab] Project received — %1 file(s)").arg(files.size()));
+    const bool readOnly = session && session->collabMode() == CollabSession::Mode::ReadOnly;
+    outputPane->appendPlainText(
+        QString("[Collab] Project received — %1 file(s)%2")
+            .arg(files.size())
+            .arg(readOnly ? " (read-only)" : ""));
 
-    if (collabStatusLabel)
-        collabStatusLabel->setText(QString("Guest — %1 file(s)").arg(files.size()));
+    if (collabStatusLabel) {
+        collabStatusLabel->setText(
+            QString("Guest — %1 file(s)%2")
+                .arg(files.size())
+                .arg(readOnly ? " · read-only" : ""));
+    }
 
     fileBrowser->setRemoteFiles(files);
     setSidePanelPage(0);
@@ -1570,22 +1658,22 @@ void MainWindow::onSessionFileCreated(const QString &relPath)
 {
     outputPane->appendPlainText("[Collab] File created: " + relPath);
 
-    if (m_session && m_session->role() == CollabSession::Role::Guest)
-        fileBrowser->setRemoteFiles(m_session->fileList());
+    if (session && session->role() == CollabSession::Role::Guest)
+        fileBrowser->setRemoteFiles(session->fileList());
 }
 
 void MainWindow::onSessionFileDeleted(const QString &relPath)
 {
     outputPane->appendPlainText("[Collab] File deleted: " + relPath);
-    if (m_session && m_session->role() == CollabSession::Role::Guest)
-        fileBrowser->setRemoteFiles(m_session->fileList());
+    if (session && session->role() == CollabSession::Role::Guest)
+        fileBrowser->setRemoteFiles(session->fileList());
 }
 
 void MainWindow::onSessionFileRenamed(const QString &oldPath, const QString &newPath)
 {
     outputPane->appendPlainText(QString("[Collab] File renamed: %1 → %2").arg(oldPath, newPath));
-    if (m_session && m_session->role() == CollabSession::Role::Guest)
-        fileBrowser->setRemoteFiles(m_session->fileList());
+    if (session && session->role() == CollabSession::Role::Guest)
+        fileBrowser->setRemoteFiles(session->fileList());
 }
 
 void MainWindow::joinRoom(const QString &room)
@@ -1625,4 +1713,194 @@ void MainWindow::joinRoom(const QString &room)
     }
 
     QTimer::singleShot(300, this, [this]() { voiceChat->connectToServer("localhost", 9000); });
+}
+
+bool MainWindow::showStartCollabDialog()
+{
+    const QString projectRoot = fileBrowser->rootPath();
+
+    QDialog dlg(this);
+    dlg.setWindowTitle("Start Collaboration");
+    dlg.setMinimumWidth(400);
+    auto *mainVl = new QVBoxLayout(&dlg);
+    mainVl->setSpacing(10);
+
+    auto *roomRow = new QHBoxLayout;
+    roomRow->addWidget(new QLabel("Room name:"));
+    auto *roomEdit = new QLineEdit;
+    roomEdit->setPlaceholderText("e.g. my-project");
+    roomRow->addWidget(roomEdit);
+    mainVl->addLayout(roomRow);
+
+    auto *permGroup = new QGroupBox("Guest permissions");
+    auto *permHl = new QHBoxLayout(permGroup);
+    auto *rbReadWrite = new QRadioButton("Read && Write");
+    auto *rbReadOnly = new QRadioButton("Read-only");
+    rbReadWrite->setChecked(true);
+    permHl->addWidget(rbReadWrite);
+    permHl->addWidget(rbReadOnly);
+    mainVl->addWidget(permGroup);
+
+    auto *filesGroup = new QGroupBox("Files to share");
+    auto *filesVl = new QVBoxLayout(filesGroup);
+    auto *rbAllFiles = new QRadioButton("All files");
+    auto *rbSelFiles = new QRadioButton("Select files/folders");
+    rbAllFiles->setChecked(true);
+    filesVl->addWidget(rbAllFiles);
+    filesVl->addWidget(rbSelFiles);
+
+    auto *fileTree = new QTreeWidget;
+    fileTree->setHeaderHidden(true);
+    fileTree->setMinimumHeight(180);
+    fileTree->setVisible(false);
+    fileTree->setSelectionMode(QAbstractItemView::NoSelection);
+
+    if (!projectRoot.isEmpty()) {
+        std::function<void(QTreeWidgetItem *, const QString &, const QString &)> populate;
+        populate = [&populate](QTreeWidgetItem *parent,
+                               const QString &absPath,
+                               const QString &relPath) {
+            const QStringList filters
+                = {"*.py", "*.cpp", "*.h", "*.pro", "*.txt", "*.md", "*.json"};
+            QDir dir(absPath);
+            for (const QString &sub :
+                 dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
+                const QString subRel = relPath.isEmpty() ? sub : relPath + "/" + sub;
+                auto *item = new QTreeWidgetItem(parent, {sub});
+                item->setCheckState(0, Qt::Checked);
+                populate(item, absPath + "/" + sub, subRel);
+            }
+            for (const QString &file : dir.entryList(filters, QDir::Files, QDir::Name)) {
+                const QString fileRel = relPath.isEmpty() ? file : relPath + "/" + file;
+                auto *item = new QTreeWidgetItem(parent, {file});
+                item->setCheckState(0, Qt::Checked);
+                item->setData(0, Qt::UserRole, fileRel);
+            }
+        };
+
+        auto *rootItem = new QTreeWidgetItem(fileTree, {QFileInfo(projectRoot).fileName()});
+        rootItem->setCheckState(0, Qt::Checked);
+        fileTree->addTopLevelItem(rootItem);
+        populate(rootItem, projectRoot, "");
+        rootItem->setExpanded(true);
+
+        connect(fileTree,
+                &QTreeWidget::itemChanged,
+                fileTree,
+                [fileTree](QTreeWidgetItem *item, int col) {
+                    if (col != 0 || !item->data(0, Qt::UserRole).toString().isEmpty())
+                        return;
+                    fileTree->blockSignals(true);
+                    std::function<void(QTreeWidgetItem *, Qt::CheckState)> cascade;
+                    cascade = [&cascade](QTreeWidgetItem *p, Qt::CheckState s) {
+                        for (int i = 0; i < p->childCount(); ++i) {
+                            p->child(i)->setCheckState(0, s);
+                            cascade(p->child(i), s);
+                        }
+                    };
+                    cascade(item, item->checkState(0) != Qt::Unchecked ? Qt::Checked : Qt::Unchecked);
+                    fileTree->blockSignals(false);
+                });
+    } else {
+        rbSelFiles->setEnabled(false);
+    }
+
+    filesVl->addWidget(fileTree);
+    connect(rbSelFiles, &QRadioButton::toggled, fileTree, &QWidget::setVisible);
+    mainVl->addWidget(filesGroup);
+
+    auto *btnRow = new QHBoxLayout;
+    btnRow->addStretch();
+    auto *btnCancel = new QPushButton("Cancel");
+    auto *btnStart = new QPushButton("Start");
+    btnStart->setDefault(true);
+    btnRow->addWidget(btnCancel);
+    btnRow->addWidget(btnStart);
+    mainVl->addLayout(btnRow);
+
+    connect(btnCancel, &QPushButton::clicked, &dlg, &QDialog::reject);
+    connect(btnStart, &QPushButton::clicked, &dlg, [&dlg, roomEdit]() {
+        if (!roomEdit->text().trimmed().isEmpty())
+            dlg.accept();
+    });
+
+    if (dlg.exec() != QDialog::Accepted)
+        return false;
+
+    const QString room = roomEdit->text().trimmed();
+    const CollabSession::Mode mode = rbReadOnly->isChecked() ? CollabSession::Mode::ReadOnly
+                                                             : CollabSession::Mode::ReadWrite;
+
+    QStringList selectedFiles;
+    if (rbSelFiles->isChecked()) {
+        std::function<void(QTreeWidgetItem *)> collect;
+        collect = [&collect, &selectedFiles](QTreeWidgetItem *item) {
+            const QString rel = item->data(0, Qt::UserRole).toString();
+            if (!rel.isEmpty() && item->checkState(0) == Qt::Checked)
+                selectedFiles.append(rel);
+            for (int i = 0; i < item->childCount(); ++i)
+                collect(item->child(i));
+        };
+        for (int i = 0; i < fileTree->topLevelItemCount(); ++i)
+            collect(fileTree->topLevelItem(i));
+    }
+
+    startCollab(room, mode, selectedFiles);
+    return true;
+}
+
+void MainWindow::onCollabUserContextMenu(const QPoint &pos)
+{
+    if (!session)
+        return;
+
+    QListWidgetItem *item = collabUsersList->itemAt(pos);
+    if (!item)
+        return;
+
+    const int targetSiteId = item->data(Qt::UserRole).toInt();
+    if (targetSiteId == session->siteId())
+        return;
+
+    QMenu menu(this);
+
+    const QString relPath = peerFiles.value(targetSiteId);
+    QAction *gotoAct = menu.addAction(QString("Перейти до User #%1").arg(targetSiteId));
+    gotoAct->setEnabled(!relPath.isEmpty());
+    connect(gotoAct, &QAction::triggered, this, [this, targetSiteId, relPath]() {
+        if (!session || relPath.isEmpty())
+            return;
+
+        const bool isGuest = session->role() == CollabSession::Role::Guest;
+        const QString openPath = isGuest
+            ? relPath
+            : QDir(session->projectRoot()).absoluteFilePath(relPath);
+
+        setSidePanelPage(0);
+
+        if (!isGuest)
+            fileBrowser->revealFile(openPath);
+
+        openFileFromBrowser(openPath);
+
+        CodeEditor *targetEd = qobject_cast<CodeEditor *>(editorTabs->currentWidget());
+        if (targetEd) {
+            const int scintillaPos = targetEd->remoteCursorPos(targetSiteId);
+            if (scintillaPos >= 0)
+                targetEd->goToScintillaPos(scintillaPos);
+        }
+    });
+
+    if (session->role() == CollabSession::Role::Host) {
+        menu.addSeparator();
+        QAction *kickAct = menu.addAction(QString("Kick User #%1").arg(targetSiteId));
+        connect(kickAct, &QAction::triggered, this, [this, targetSiteId]() {
+            if (!session)
+                return;
+            session->kickUser(targetSiteId);
+            outputPane->appendPlainText(QString("[Collab] Kicked user #%1").arg(targetSiteId));
+        });
+    }
+
+    menu.exec(collabUsersList->viewport()->mapToGlobal(pos));
 }

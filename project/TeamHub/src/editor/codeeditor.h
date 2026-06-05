@@ -61,6 +61,9 @@ public slots:
     void clearRemoteCursors();
     void paintRemoteCursors(QWidget *overlay);
 
+    int remoteCursorPos(int siteId) const;
+    void goToScintillaPos(int pos);
+
 signals:
     void fileModified();
     void fileSaved();

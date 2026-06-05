@@ -4,40 +4,18 @@
 
 RGAManager::RGAManager(int siteId, QObject *parent)
     : QObject(parent)
-    , socket(new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, this))
     , siteId(siteId)
     , timestamp(0)
-{
-    connect(socket, &QWebSocket::connected, this, &RGAManager::onConnected);
-    connect(socket, &QWebSocket::disconnected, this, &RGAManager::onDisconnected);
-    connect(socket, &QWebSocket::textMessageReceived, this, &RGAManager::onRawMessage);
-    connect(socket,
-            QOverload<QAbstractSocket::SocketError>::of(&QWebSocket::error),
-            this,
-            &RGAManager::onError);
-}
-
-void RGAManager::connectToServer(const QString &url)
-{
-    socket->open(QUrl(url));
-}
-void RGAManager::disconnectFromServer()
-{
-    socket->close();
-}
-bool RGAManager::isConnected() const
-{
-    return socket->state() == QAbstractSocket::ConnectedState;
-}
+{}
 
 void RGAManager::setFilePath(const QString &filePath)
 {
-    m_filePath = filePath;
+    this->filePath = filePath;
 }
 
 void RGAManager::setSendFunction(std::function<void(QJsonObject)> fn)
 {
-    m_sendFn = std::move(fn);
+    sendFn = std::move(fn);
 }
 
 void RGAManager::handleIncomingMessage(const QJsonObject &obj)
@@ -123,28 +101,6 @@ void RGAManager::remoteDelete(const RGAId &id)
     emit remoteTextChanged(sequence.toText());
 }
 
-void RGAManager::onConnected()
-{
-    registerWithServer();
-    emit connected();
-}
-void RGAManager::onDisconnected()
-{
-    emit disconnected();
-}
-
-void RGAManager::onRawMessage(const QString &message)
-{
-    QJsonDocument doc = QJsonDocument::fromJson(message.toUtf8());
-    if (doc.isObject())
-        processMessage(doc.object());
-}
-
-void RGAManager::onError(QAbstractSocket::SocketError)
-{
-    emit errorOccurred(socket->errorString());
-}
-
 void RGAManager::processMessage(const QJsonObject &obj)
 {
     const QString type = obj["type"].toString();
@@ -217,20 +173,16 @@ QJsonObject RGAManager::nodeToJson(const RGANode &node) const
 
 void RGAManager::sendMessage(QJsonObject msg)
 {
-    if (m_sendFn) {
-        if (!m_filePath.isEmpty() && !msg.contains("file"))
-            msg["file"] = m_filePath;
-        m_sendFn(msg);
+    if (!sendFn)
         return;
-    }
-    if (!isConnected())
-        return;
-    socket->sendTextMessage(QJsonDocument(msg).toJson(QJsonDocument::Compact));
+    if (!filePath.isEmpty() && !msg.contains("file"))
+        msg["file"] = filePath;
+    sendFn(msg);
 }
 
 void RGAManager::buildFromText(const QString &text)
 {
-    sequence.rgaseq.clear();
+    sequence.clear();
     sequence.rgaseq.reserve(text.size());
     timestamp = 0;
 
@@ -245,6 +197,7 @@ void RGAManager::buildFromText(const QString &text)
         sequence.rgaseq.append(node);
         parent = node.id;
     }
+    sequence.rebuildIndex();
 }
 
 void RGAManager::sendInitText(const QString &text, const QString &path)
@@ -256,14 +209,6 @@ void RGAManager::sendInitText(const QString &text, const QString &path)
     sendMessage(msg);
 }
 
-void RGAManager::registerWithServer()
-{
-    QJsonObject msg;
-    msg["type"] = "register";
-    msg["siteId"] = siteId;
-    sendMessage(msg);
-}
-
 void RGAManager::sendCursorPosition(int scintillaPos)
 {
     QJsonObject msg;
@@ -271,31 +216,6 @@ void RGAManager::sendCursorPosition(int scintillaPos)
     msg["siteId"] = siteId;
     msg["position"] = scintillaPos;
     sendMessage(msg);
-}
-
-QJsonArray RGAManager::sequenceToJson() const
-{
-    QJsonArray arr;
-    for (const RGANode &node : sequence.rgaseq) {
-        QJsonObject obj;
-        obj["id"] = idToJson(node.id);
-        obj["parent"] = idToJson(node.parent);
-        obj["val"] = QString(node.val);
-        obj["tombstone"] = node.tombstone;
-        arr.append(obj);
-    }
-    return arr;
-}
-
-void RGAManager::sequenceFromJson(const QJsonArray &arr)
-{
-    sequence.clear();
-    timestamp = 0;
-    for (const QJsonValue &val : arr) {
-        RGANode node = nodeFromJson(val.toObject());
-        sequence.insert(node);
-        timestamp = qMax(timestamp, node.id.timestamp);
-    }
 }
 
 void RGAManager::debug()

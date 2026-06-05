@@ -23,26 +23,18 @@ static bool isRootId(const RGAId& id)
 
 void RGASequence::insert(const RGANode& node)
 {
-    if (findById(node.id) != nullptr)
+    const qint64 enc = encodeId(node.id);
+    if (idIndex.contains(enc))
         return;
 
     int insertIndex = 0;
-    bool parentFound = false;
 
-    for (int i = 0; i < rgaseq.size(); ++i) {
-        if (rgaseq[i].id == node.parent) {
-            insertIndex = i + 1;
-            parentFound = true;
-            break;
-        }
+    if (!isRootId(node.parent)) {
+        auto pit = idIndex.find(encodeId(node.parent));
+        if (pit == idIndex.end())
+            return;
+        insertIndex = pit.value() + 1;
     }
-
-    if (!parentFound && !isRootId(node.parent))
-        return;
-
-    auto encodeId = [](const RGAId& id) -> qint64 {
-        return ((qint64)id.timestamp << 32) | (quint32)id.siteId;
-    };
 
     QSet<qint64> skippedSet;
 
@@ -65,6 +57,12 @@ void RGASequence::insert(const RGANode& node)
     }
 
     rgaseq.insert(insertIndex, node);
+
+    for (auto it = idIndex.begin(); it != idIndex.end(); ++it) {
+        if (it.value() >= insertIndex)
+            ++it.value();
+    }
+    idIndex.insert(enc, insertIndex);
 }
 
 void RGASequence::remove(const RGAId& id)
@@ -91,13 +89,10 @@ QString RGASequence::toText()
 
 RGANode* RGASequence::findById(const RGAId& id)
 {
-    for (RGANode& node : rgaseq) {
-        if (node.id == id) {
-            return &node;
-        }
-    }
-
-    return nullptr;
+    auto it = idIndex.find(encodeId(id));
+    if (it == idIndex.end())
+        return nullptr;
+    return &rgaseq[it.value()];
 }
 
 RGAId RGASequence::idAtPosition(int pos)
@@ -133,6 +128,16 @@ int RGASequence::length()
     return count;
 }
 
-void RGASequence::clear(){
+void RGASequence::clear()
+{
     rgaseq.clear();
+    idIndex.clear();
+}
+
+void RGASequence::rebuildIndex()
+{
+    idIndex.clear();
+    idIndex.reserve(rgaseq.size());
+    for (int i = 0; i < rgaseq.size(); ++i)
+        idIndex.insert(encodeId(rgaseq[i].id), i);
 }

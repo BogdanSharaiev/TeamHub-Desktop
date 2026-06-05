@@ -141,6 +141,15 @@ void FileBrowser::setRemoteFiles(const QStringList &relPaths)
     searchBox->setEnabled(false);
 }
 
+void FileBrowser::revealFile(const QString &absolutePath)
+{
+    QModelIndex index = model->index(absolutePath);
+    if (index.isValid()) {
+        tree->setCurrentIndex(index);
+        tree->scrollTo(index, QAbstractItemView::PositionAtCenter);
+    }
+}
+
 void FileBrowser::clearRemoteMode()
 {
     remoteTree->clear();

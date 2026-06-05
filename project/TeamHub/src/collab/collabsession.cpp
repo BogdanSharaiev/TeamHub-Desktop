@@ -104,6 +104,24 @@ void CollabSession::notifyFileDeleted(const QString &relPath)
     sendMessage(msg);
 }
 
+void CollabSession::sendCursorLeave(const QString &relPath)
+{
+    QJsonObject msg;
+    msg["type"] = "cursor_leave";
+    msg["file"] = relPath;
+    msg["siteId"] = siteId_;
+    sendMessage(msg);
+}
+
+void CollabSession::sendFileFocus(const QString &relPath)
+{
+    QJsonObject msg;
+    msg["type"] = "file_focus";
+    msg["file"] = relPath;
+    msg["siteId"] = siteId_;
+    sendMessage(msg);
+}
+
 void CollabSession::notifyFileRenamed(const QString &oldPath, const QString &newPath)
 {
     const int idx = fileList_.indexOf(oldPath);
@@ -216,6 +234,7 @@ void CollabSession::applyOpToInactive(const QString &file, const QJsonObject &op
             parent = node.id;
         }
         state.maxTimestamp = ts;
+        state.sequence.rebuildIndex();
     }
 
     const QString type = op["type"].toString();
@@ -260,11 +279,18 @@ void CollabSession::handleMessage(const QJsonObject &obj)
     const QString type = obj["type"].toString();
     const QString file = obj["file"].toString();
 
+    if (type == "kicked") {
+        emit kicked();
+        return;
+    }
+
     if (type == "project_init") {
         QStringList files;
         for (const QJsonValue &v : obj["files"].toArray())
             files.append(v.toString());
         fileList_ = files;
+        if (obj["mode"].toString() == "readonly")
+            mode_ = Mode::ReadOnly;
         emit projectInitReceived(obj["host"].toInt(), files);
         return;
     }
@@ -284,8 +310,24 @@ void CollabSession::handleMessage(const QJsonObject &obj)
     }
 
     if (type == "cursor_leave") {
-        for (auto *mgr : active.values())
-            mgr->handleIncomingMessage(obj);
+        const int sid = obj["siteId"].toInt();
+        if (!file.isEmpty()) {
+            cursorCache[file].remove(sid);
+            if (active.contains(file))
+                active[file]->handleIncomingMessage(obj);
+        } else {
+            for (auto &fileCursors : cursorCache)
+                fileCursors.remove(sid);
+            for (auto *mgr : active.values())
+                mgr->handleIncomingMessage(obj);
+        }
+        return;
+    }
+
+    if (type == "file_focus") {
+        const int sid = obj["siteId"].toInt();
+        if (sid != siteId_)
+            emit remoteFileFocusChanged(sid, file);
         return;
     }
 
@@ -343,8 +385,14 @@ void CollabSession::handleMessage(const QJsonObject &obj)
     }
 
     if (type == "cursor") {
-        if (!file.isEmpty() && active.contains(file))
-            active[file]->handleIncomingMessage(obj);
+        if (!file.isEmpty()) {
+            const int sid = obj["siteId"].toInt();
+            const int pos = obj["position"].toInt();
+            if (sid != siteId_)
+                cursorCache[file][sid] = pos;
+            if (active.contains(file))
+                active[file]->handleIncomingMessage(obj);
+        }
         return;
     }
 
@@ -367,6 +415,14 @@ void CollabSession::sendMessage(const QJsonObject &msg)
     socket->sendTextMessage(QJsonDocument(msg).toJson(QJsonDocument::Compact));
 }
 
+void CollabSession::kickUser(int siteId)
+{
+    QJsonObject msg;
+    msg["type"] = "kick";
+    msg["siteId"] = siteId;
+    sendMessage(msg);
+}
+
 void CollabSession::sendRegister()
 {
     QJsonObject msg;
@@ -374,11 +430,14 @@ void CollabSession::sendRegister()
     msg["siteId"] = siteId_;
     msg["role"] = (role_ == Role::Host) ? "host" : "guest";
 
-    if (role_ == Role::Host && !fileList_.isEmpty()) {
-        QJsonArray arr;
-        for (const QString &f : fileList_)
-            arr.append(f);
-        msg["files"] = arr;
+    if (role_ == Role::Host) {
+        msg["mode"] = (mode_ == Mode::ReadOnly) ? "readonly" : "readwrite";
+        if (!fileList_.isEmpty()) {
+            QJsonArray arr;
+            for (const QString &f : fileList_)
+                arr.append(f);
+            msg["files"] = arr;
+        }
     }
     sendMessage(msg);
 }

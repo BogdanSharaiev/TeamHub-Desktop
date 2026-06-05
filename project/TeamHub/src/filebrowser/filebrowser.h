@@ -21,6 +21,7 @@ public:
     QString findFile(const QString &filename);
 
     void setRemoteFiles(const QStringList &relPaths);
+    void revealFile(const QString &absolutePath);
 
     void clearRemoteMode();
 
