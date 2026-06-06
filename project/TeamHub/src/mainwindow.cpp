@@ -443,8 +443,12 @@ void MainWindow::joinCollab()
 void MainWindow::wireEditorToManager(CodeEditor *ed, RGAManager *mgr)
 {
     connect(ed, &CodeEditor::localInsert, mgr, &RGAManager::localInsert, Qt::UniqueConnection);
-
     connect(ed, &CodeEditor::localDelete, mgr, &RGAManager::localRemove, Qt::UniqueConnection);
+    connect(ed, &CodeEditor::undoRequested, mgr, &RGAManager::undo, Qt::UniqueConnection);
+    connect(ed, &CodeEditor::redoRequested, mgr, &RGAManager::redo, Qt::UniqueConnection);
+    connect(ed, &CodeEditor::beginUndoGroup, mgr, &RGAManager::beginGroup, Qt::UniqueConnection);
+    connect(ed, &CodeEditor::endUndoGroup, mgr, &RGAManager::endGroup, Qt::UniqueConnection);
+    ed->collabActive = true;
 
     connect(mgr, &RGAManager::remoteTextChanged, ed, [ed](const QString &newText) {
         ed->applyRemoteText(newText);
@@ -505,6 +509,7 @@ void MainWindow::stopAllCollab()
         if (!ed)
             continue;
         ed->clearRemoteCursors();
+        ed->collabActive = false;
         markTabAsCollab(ed, false);
     }
 

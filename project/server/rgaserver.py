@@ -137,7 +137,7 @@ async def handle_client(websocket):
                     await broadcast(room, websocket, payload)
                 continue
 
-            if t in ("insert", "delete"):
+            if t in ("insert", "delete", "undelete"):
                 file_history[room].setdefault(file_key, []).append(payload)
                 await broadcast(room, websocket, payload)
                 continue

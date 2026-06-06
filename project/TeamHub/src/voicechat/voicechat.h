@@ -25,6 +25,7 @@ struct PeerInfo
     bool connected = false;
     QAudioSink *sink = nullptr;
     QIODevice *output = nullptr;
+    OpusDecoder *decoder = nullptr;
 };
 
 class VoiceChat : public QObject
@@ -99,7 +100,6 @@ private:
     quint16 serverPort = 0;
 
     OpusEncoder *opusEncoder = nullptr;
-    OpusDecoder *opusDecoder = nullptr;
     QByteArray captureBuffer;
     static constexpr int OPUS_FRAME_SIZE = 320;
     QTimer *flushTimer;

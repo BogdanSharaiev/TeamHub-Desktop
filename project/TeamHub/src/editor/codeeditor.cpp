@@ -3,11 +3,13 @@
 #include <Qsci/qscicommand.h>
 #include <Qsci/qscicommandset.h>
 
+#include <QClipboard>
 #include <QColor>
 #include <QDir>
 #include <QFile>
 #include <QFont>
 #include <QFontMetrics>
+#include <QGuiApplication>
 #include <QKeyEvent>
 #include <QPainter>
 #include <QRegularExpression>
@@ -189,6 +191,14 @@ void CodeEditor::keyPressEvent(QKeyEvent *event)
     const int key = event->key();
 
     if (mod == Qt::ControlModifier) {
+        if (key == Qt::Key_Z) {
+            undo();
+            return;
+        }
+        if (key == Qt::Key_Y) {
+            redo();
+            return;
+        }
         if (mod == Qt::ControlModifier && key == Qt::Key_F) {
             showSearch();
             return;
@@ -210,6 +220,25 @@ void CodeEditor::keyPressEvent(QKeyEvent *event)
             resetZoom();
             return;
         }
+        if (key == Qt::Key_X) {
+            deleteSelection();
+            return;
+        }
+        if (key == Qt::Key_V) {
+            if (!selectedText().isEmpty())
+                deleteSelection();
+            const int startPos = (int) SendScintilla(SCI_GETCURRENTPOS);
+            QsciScintilla::keyPressEvent(event);
+            const QString clip = QGuiApplication::clipboard()->text();
+            emit beginUndoGroup();
+            int byteOff = startPos;
+            for (QChar c : clip) {
+                emit localInsert(byteOff, c);
+                byteOff += QString(c).toUtf8().size();
+            }
+            emit endUndoGroup();
+            return;
+        }
     }
 
     if (mod == Qt::NoModifier || mod == Qt::ShiftModifier) {
@@ -217,6 +246,8 @@ void CodeEditor::keyPressEvent(QKeyEvent *event)
         if (!txt.isEmpty()) {
             QChar ch = txt.at(0);
             if (ch.isPrint() || ch == '\n' || ch == '\r') {
+                if (!selectedText().isEmpty())
+                    deleteSelection();
                 int pos = SendScintilla(SCI_GETCURRENTPOS);
                 QChar sendChar = (ch == '\r') ? QChar('\n') : ch;
                 QsciScintilla::keyPressEvent(event);
@@ -236,6 +267,10 @@ void CodeEditor::keyPressEvent(QKeyEvent *event)
         }
 
         if (key == Qt::Key_Backspace && mod == Qt::NoModifier) {
+            if (!selectedText().isEmpty()) {
+                deleteSelection();
+                return;
+            }
             int pos = SendScintilla(SCI_GETCURRENTPOS);
             if (pos > 0) {
                 const int prevPos = (int) SendScintilla(SCI_POSITIONBEFORE, (ulong) pos);
@@ -248,6 +283,10 @@ void CodeEditor::keyPressEvent(QKeyEvent *event)
         }
 
         if (key == Qt::Key_Delete && mod == Qt::NoModifier) {
+            if (!selectedText().isEmpty()) {
+                deleteSelection();
+                return;
+            }
             int pos = SendScintilla(SCI_GETCURRENTPOS);
             const int nextPos = (int) SendScintilla(SCI_POSITIONAFTER, (ulong) pos);
             const int byteLen = nextPos - pos;
@@ -284,7 +323,15 @@ bool CodeEditor::autoCloseChar(QKeyEvent *event)
 
         const QString selected = selectedText();
         if (!selected.isEmpty()) {
-            replaceSelectedText(QString(open) + selected + close);
+            const int selStart = (int) SendScintilla(SCI_GETSELECTIONSTART);
+            const int openByteLen = QString(open).toUtf8().size();
+            const int selByteLen = selected.toUtf8().size();
+            const int closeByteLen = QString(close).toUtf8().size();
+            replaceSelectedText(QString(open) + selected + QString(close));
+            emit localInsert(selStart, open);
+            emit localInsert(selStart + openByteLen + selByteLen, close);
+            shiftRemoteCursors(selStart, openByteLen);
+            shiftRemoteCursors(selStart + openByteLen + selByteLen, closeByteLen);
         } else {
             int pos = SendScintilla(SCI_GETCURRENTPOS);
             QsciScintilla::keyPressEvent(event);
@@ -704,6 +751,22 @@ void CodeEditor::resetZoom()
     zoomLevel = 0;
 }
 
+void CodeEditor::undo()
+{
+    if (collabActive)
+        emit undoRequested();
+    else
+        QsciScintilla::undo();
+}
+
+void CodeEditor::redo()
+{
+    if (collabActive)
+        emit redoRequested();
+    else
+        QsciScintilla::redo();
+}
+
 void CodeEditor::onCharAdded(int ch)
 {
     int pos = SendScintilla(SCI_GETCURRENTPOS);
@@ -888,6 +951,21 @@ void CodeEditor::selectCurrentMatch(const QString &searchText)
     textSearch->updateMatchLabel(searchCurrentIndex + 1, searchMatches.size());
 }
 
+void CodeEditor::deleteSelection()
+{
+    const QString sel = selectedText();
+    if (sel.isEmpty())
+        return;
+    const int selStart = (int) SendScintilla(SCI_GETSELECTIONSTART);
+    const int selEnd = (int) SendScintilla(SCI_GETSELECTIONEND);
+    emit beginUndoGroup();
+    removeSelectedText();
+    for (int i = 0; i < sel.size(); ++i)
+        emit localDelete(selStart);
+    emit endUndoGroup();
+    shiftRemoteCursors(selStart, -(selEnd - selStart));
+}
+
 void CodeEditor::shiftRemoteCursors(int fromBytePos, int byteDelta)
 {
     if (remoteCursorPositions.isEmpty())
@@ -940,8 +1018,8 @@ void CodeEditor::goToScintillaPos(int pos)
 {
     if (pos < 0)
         return;
-    int line = (int)SendScintilla(SCI_LINEFROMPOSITION, (ulong)pos);
-    int col  = (int)SendScintilla(SCI_GETCOLUMN, (ulong)pos);
+    int line = (int) SendScintilla(SCI_LINEFROMPOSITION, (ulong) pos);
+    int col = (int) SendScintilla(SCI_GETCOLUMN, (ulong) pos);
     setCursorPosition(line, col);
     ensureLineVisible(line);
 }

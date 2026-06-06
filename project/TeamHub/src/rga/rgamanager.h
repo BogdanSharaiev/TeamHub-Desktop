@@ -3,8 +3,16 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QObject>
+#include <QStack>
+#include <QVector>
 #include "rgaseq.h"
 #include <functional>
+
+struct UndoOp
+{
+    enum class Type { Insert, Delete } type;
+    RGANode node;
+};
 
 class RGAManager : public QObject
 {
@@ -37,6 +45,10 @@ public:
 public slots:
     void localInsert(int position, QChar ch);
     void localRemove(int position);
+    void undo();
+    void redo();
+    void beginGroup();
+    void endGroup();
 
 signals:
     void textChanged(const QString &newText);
@@ -60,5 +72,10 @@ private:
 
     QString filePath;
     std::function<void(QJsonObject)> sendFn;
+
+    QStack<QVector<UndoOp>> undoStack;
+    QStack<QVector<UndoOp>> redoStack;
+    QVector<UndoOp> pendingGroup;
+    bool grouping = false;
 };
 #endif

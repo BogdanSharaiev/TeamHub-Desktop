@@ -40,9 +40,12 @@ public:
     void hideSearch();
 
     bool applyingRemote = false;
+    bool collabActive = false;
 
 public slots:
     void resetZoom();
+    void undo();
+    void redo();
     void onCursorChanged(int line, int index);
     void applyDarkTheme();
     void applyLightTheme();
@@ -71,6 +74,10 @@ signals:
     void modifyChanged(bool modified);
     void localInsert(int position, QChar ch);
     void localDelete(int position);
+    void undoRequested();
+    void redoRequested();
+    void beginUndoGroup();
+    void endUndoGroup();
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
@@ -101,6 +108,7 @@ private:
     bool skipClosingChar(QKeyEvent *event);
     bool handleBackspaceInPair(QKeyEvent *event);
 
+    void deleteSelection();
     void shiftRemoteCursors(int fromBytePos, int byteDelta);
 
     void checkSyntax();

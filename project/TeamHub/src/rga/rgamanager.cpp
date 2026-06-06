@@ -61,6 +61,14 @@ void RGAManager::localInsert(int bytePos, QChar ch)
 
     sequence.insert(node);
 
+    UndoOp op{UndoOp::Type::Insert, node};
+    if (grouping) {
+        pendingGroup.append(op);
+    } else {
+        undoStack.push({op});
+    }
+    redoStack.clear();
+
     QJsonObject msg;
     msg["type"] = "insert";
     msg["node"] = nodeToJson(node);
@@ -78,7 +86,20 @@ void RGAManager::localRemove(int bytePos)
     if (id.timestamp == 0 && id.siteId == 0)
         return;
 
+    RGANode *nodePtr = sequence.findById(id);
+    if (!nodePtr)
+        return;
+    const RGANode savedNode = *nodePtr;
+
     sequence.remove(id);
+
+    UndoOp op{UndoOp::Type::Delete, savedNode};
+    if (grouping) {
+        pendingGroup.append(op);
+    } else {
+        undoStack.push({op});
+    }
+    redoStack.clear();
 
     QJsonObject msg;
     msg["type"] = "delete";
@@ -127,6 +148,9 @@ void RGAManager::processMessage(const QJsonObject &obj)
             emit remoteCursorMoved(sid, pos);
     } else if (type == "cursor_leave") {
         emit remoteCursorLeft(obj["siteId"].toInt());
+    } else if (type == "undelete") {
+        sequence.undelete(idFromJson(obj["id"].toObject()));
+        emit remoteTextChanged(sequence.toText());
     } else if (type == "user_list") {
         QJsonArray arr = obj["siteIds"].toArray();
         QList<int> ids;
@@ -216,6 +240,82 @@ void RGAManager::sendCursorPosition(int scintillaPos)
     msg["siteId"] = siteId;
     msg["position"] = scintillaPos;
     sendMessage(msg);
+}
+
+void RGAManager::beginGroup()
+{
+    grouping = true;
+    pendingGroup.clear();
+}
+
+void RGAManager::endGroup()
+{
+    grouping = false;
+    if (!pendingGroup.isEmpty()) {
+        undoStack.push(pendingGroup);
+        pendingGroup.clear();
+    }
+}
+
+void RGAManager::undo()
+{
+    if (grouping && !pendingGroup.isEmpty()) {
+        undoStack.push(pendingGroup);
+        pendingGroup.clear();
+        grouping = false;
+    }
+    if (undoStack.isEmpty())
+        return;
+
+    const auto group = undoStack.pop();
+    QVector<UndoOp> reverseGroup;
+
+    for (int i = group.size() - 1; i >= 0; --i) {
+        const UndoOp &op = group[i];
+        QJsonObject msg;
+        if (op.type == UndoOp::Type::Insert) {
+            sequence.remove(op.node.id);
+            msg["type"] = "delete";
+            msg["id"] = idToJson(op.node.id);
+        } else {
+            sequence.undelete(op.node.id);
+            msg["type"] = "undelete";
+            msg["id"] = idToJson(op.node.id);
+        }
+        sendMessage(msg);
+        reverseGroup.append(op);
+    }
+
+    redoStack.push(reverseGroup);
+    emit remoteTextChanged(sequence.toText());
+}
+
+void RGAManager::redo()
+{
+    if (redoStack.isEmpty())
+        return;
+
+    const auto group = redoStack.pop();
+    QVector<UndoOp> reverseGroup;
+
+    for (int i = group.size() - 1; i >= 0; --i) {
+        const UndoOp &op = group[i];
+        QJsonObject msg;
+        if (op.type == UndoOp::Type::Insert) {
+            sequence.undelete(op.node.id);
+            msg["type"] = "undelete";
+            msg["id"] = idToJson(op.node.id);
+        } else {
+            sequence.remove(op.node.id);
+            msg["type"] = "delete";
+            msg["id"] = idToJson(op.node.id);
+        }
+        sendMessage(msg);
+        reverseGroup.append(op);
+    }
+
+    undoStack.push(reverseGroup);
+    emit remoteTextChanged(sequence.toText());
 }
 
 void RGAManager::debug()

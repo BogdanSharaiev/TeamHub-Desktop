@@ -248,6 +248,10 @@ void CollabSession::applyOpToInactive(const QString &file, const QJsonObject &op
         RGAId id = RGAManager::idFromJson(op["id"].toObject());
         state.sequence.remove(id);
         textCache[file] = state.sequence.toText();
+    } else if (type == "undelete") {
+        RGAId id = RGAManager::idFromJson(op["id"].toObject());
+        state.sequence.undelete(id);
+        textCache[file] = state.sequence.toText();
     }
 }
 
@@ -396,7 +400,7 @@ void CollabSession::handleMessage(const QJsonObject &obj)
         return;
     }
 
-    if (type == "insert" || type == "delete") {
+    if (type == "insert" || type == "delete" || type == "undelete") {
         if (file.isEmpty())
             return;
         if (active.contains(file))

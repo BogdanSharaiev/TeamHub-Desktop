@@ -1,6 +1,6 @@
 #include "rgaseq.h"
 
-static bool lessById(const RGAId& a, const RGAId& b)
+static bool lessById(const RGAId &a, const RGAId &b)
 {
     if (a.timestamp != b.timestamp)
         return a.timestamp < b.timestamp;
@@ -8,7 +8,7 @@ static bool lessById(const RGAId& a, const RGAId& b)
     return a.siteId < b.siteId;
 }
 
-static bool greaterById(const RGAId& a, const RGAId& b)
+static bool greaterById(const RGAId &a, const RGAId &b)
 {
     if (a.timestamp != b.timestamp)
         return a.timestamp > b.timestamp;
@@ -16,12 +16,12 @@ static bool greaterById(const RGAId& a, const RGAId& b)
     return a.siteId > b.siteId;
 }
 
-static bool isRootId(const RGAId& id)
+static bool isRootId(const RGAId &id)
 {
     return id.timestamp == 0 && id.siteId == 0;
 }
 
-void RGASequence::insert(const RGANode& node)
+void RGASequence::insert(const RGANode &node)
 {
     const qint64 enc = encodeId(node.id);
     if (idIndex.contains(enc))
@@ -39,7 +39,7 @@ void RGASequence::insert(const RGANode& node)
     QSet<qint64> skippedSet;
 
     while (insertIndex < rgaseq.size()) {
-        const RGANode& curr = rgaseq[insertIndex];
+        const RGANode &curr = rgaseq[insertIndex];
 
         if (curr.parent == node.parent) {
             if (greaterById(curr.id, node.id)) {
@@ -65,9 +65,9 @@ void RGASequence::insert(const RGANode& node)
     idIndex.insert(enc, insertIndex);
 }
 
-void RGASequence::remove(const RGAId& id)
+void RGASequence::remove(const RGAId &id)
 {
-    RGANode* node = findById(id);
+    RGANode *node = findById(id);
 
     if (!node)
         return;
@@ -78,7 +78,7 @@ QString RGASequence::toText()
 {
     QString result;
 
-    for (const RGANode& node : rgaseq) {
+    for (const RGANode &node : rgaseq) {
         if (!node.tombstone) {
             result.append(node.val);
         }
@@ -87,7 +87,7 @@ QString RGASequence::toText()
     return result;
 }
 
-RGANode* RGASequence::findById(const RGAId& id)
+RGANode *RGASequence::findById(const RGAId &id)
 {
     auto it = idIndex.find(encodeId(id));
     if (it == idIndex.end())
@@ -102,7 +102,7 @@ RGAId RGASequence::idAtPosition(int pos)
 
     int visibleIndex = 0;
 
-    for (const RGANode& node : rgaseq) {
+    for (const RGANode &node : rgaseq) {
         if (node.tombstone)
             continue;
 
@@ -119,7 +119,7 @@ int RGASequence::length()
 {
     int count = 0;
 
-    for (const RGANode& node : rgaseq) {
+    for (const RGANode &node : rgaseq) {
         if (!node.tombstone) {
             ++count;
         }
@@ -132,6 +132,13 @@ void RGASequence::clear()
 {
     rgaseq.clear();
     idIndex.clear();
+}
+
+void RGASequence::undelete(const RGAId &id)
+{
+    RGANode *node = findById(id);
+    if (node)
+        node->tombstone = false;
 }
 
 void RGASequence::rebuildIndex()

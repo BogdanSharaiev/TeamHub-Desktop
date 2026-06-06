@@ -57,7 +57,6 @@ VoiceChat::VoiceChat(QObject *parent)
     flushTimer = new QTimer(this);
     flushTimer->setSingleShot(false);
     flushTimer->setInterval(40);
-    connect(flushTimer, &QTimer::timeout, this, [this]() {});
 }
 
 VoiceChat::~VoiceChat()
@@ -105,7 +104,7 @@ void VoiceChat::disconnectFromServer()
 
 void VoiceChat::startCall()
 {
-    if (audioSource || audioInput || opusEncoder || opusDecoder) {
+    if (audioSource || audioInput || opusEncoder) {
         return;
     }
     QAudioFormat fmt = audioFormat();
@@ -127,11 +126,6 @@ void VoiceChat::startCall()
     }
     opus_encoder_ctl(opusEncoder, OPUS_SET_BITRATE(24000)); // 24 kbps
 
-    opusDecoder = opus_decoder_create(16000, 1, &err);
-    if (err != OPUS_OK) {
-        emit statusChanged("Opus decoder error: " + QString(opus_strerror(err)));
-        return;
-    }
     connect(audioInput, &QIODevice::readyRead, this, &VoiceChat::onAudioInputReady);
 
     for (PeerInfo &peer : peers)
@@ -167,11 +161,6 @@ void VoiceChat::stopCall()
     if (opusEncoder) {
         opus_encoder_destroy(opusEncoder);
         opusEncoder = nullptr;
-    }
-
-    if (opusDecoder) {
-        opus_decoder_destroy(opusDecoder);
-        opusDecoder = nullptr;
     }
 }
 
@@ -566,7 +555,7 @@ void VoiceChat::onUdpReadyRead()
         if (!peer.connected)
             markPeerConnected(idx);
 
-        if (!opusDecoder)
+        if (!peer.decoder)
             continue;
 
         if (!peer.sink)
@@ -577,7 +566,7 @@ void VoiceChat::onUdpReadyRead()
 
         QByteArray pcmOut(OPUS_FRAME_SIZE * sizeof(opus_int16), '\0');
 
-        int samples = opus_decode(opusDecoder,
+        int samples = opus_decode(peer.decoder,
                                   reinterpret_cast<const unsigned char *>(data.constData()),
                                   data.size(),
                                   reinterpret_cast<opus_int16 *>(pcmOut.data()),
@@ -648,10 +637,24 @@ void VoiceChat::createPeerSink(PeerInfo &peer)
         return;
     peer.sink = new QAudioSink(QMediaDevices::defaultAudioOutput(), audioFormat(), this);
     peer.output = peer.sink->start();
+
+    if (!peer.decoder) {
+        int err;
+        peer.decoder = opus_decoder_create(16000, 1, &err);
+        if (err != OPUS_OK) {
+            emit statusChanged("Opus decoder error for peer: " + QString(opus_strerror(err)));
+            peer.decoder = nullptr;
+        }
+    }
 }
 
 void VoiceChat::destroyPeerSink(PeerInfo &peer)
 {
+    if (peer.decoder) {
+        opus_decoder_destroy(peer.decoder);
+        peer.decoder = nullptr;
+    }
+
     if (!peer.sink)
         return;
 
