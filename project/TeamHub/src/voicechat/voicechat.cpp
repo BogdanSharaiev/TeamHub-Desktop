@@ -83,6 +83,13 @@ void VoiceChat::connectToServer(const QString &host, quint16 port)
         }
     }
 
+    if (host == "localhost" || host == "127.0.0.1") {
+        publicIp = "127.0.0.1";
+        publicPort = udpSocket->localPort();
+        webSocket->open(QUrl(QString("ws://%1:%2").arg(host).arg(port)));
+        return;
+    }
+
     emit statusChanged("Performing STUN discovery…");
     performStun();
 }
@@ -338,6 +345,63 @@ void VoiceChat::onWebSocketConnected()
     emit connectedToServer();
 }
 
+void VoiceChat::requestRooms()
+{
+    if (webSocket->state() != QAbstractSocket::ConnectedState)
+        return;
+    QJsonObject req;
+    req["type"] = "get_rooms";
+    webSocket->sendTextMessage(QJsonDocument(req).toJson(QJsonDocument::Compact));
+}
+
+void VoiceChat::setPeerMuted(int peerId, bool muted)
+{
+    for (PeerInfo &p : peers)
+        if (p.id == peerId) {
+            p.locallyMuted = muted;
+            return;
+        }
+}
+
+void VoiceChat::setPeerVolume(int peerId, float volume)
+{
+    for (PeerInfo &p : peers) {
+        if (p.id == peerId) {
+            p.localVolume = qBound(0.0f, volume, 2.0f);
+            if (p.sink)
+                p.sink->setVolume(p.localVolume);
+            return;
+        }
+    }
+}
+
+bool VoiceChat::isPeerMuted(int peerId) const
+{
+    for (const PeerInfo &p : peers)
+        if (p.id == peerId)
+            return p.locallyMuted;
+    return false;
+}
+
+float VoiceChat::peerVolume(int peerId) const
+{
+    for (const PeerInfo &p : peers)
+        if (p.id == peerId)
+            return p.localVolume;
+    return 1.0f;
+}
+
+void VoiceChat::kickPeer(int peerId)
+{
+    if (!isRoomHost_)
+        return;
+    QJsonObject msg;
+    msg["type"] = "voip_kick";
+    msg["target"] = peerId;
+    msg["id"] = publicId;
+    webSocket->sendTextMessage(QJsonDocument(msg).toJson(QJsonDocument::Compact));
+}
+
 void VoiceChat::onWebSocketDisconnected()
 {
     punchTimer->stop();
@@ -362,22 +426,32 @@ void VoiceChat::onWebSocketTextMessageReceived(const QString &message)
     QString type = obj.value("type").toString();
 
     if (type == "peer_list") {
+        const int hostId = obj.value("host_id").toInt(-1);
+        const bool wasHost = isRoomHost_;
+        isRoomHost_ = (hostId == publicId);
+        if (isRoomHost_ != wasHost)
+            emit hostStatusChanged(isRoomHost_);
         updatePeerList(obj.value("peers").toArray());
         return;
     }
 
+    if (type == "voip_kicked") {
+        emit voipKicked();
+        disconnectFromServer();
+        return;
+    }
+
     if (type == "rooms_list") {
-        QJsonArray arr = obj.value("rooms").toArray();
-
-        QStringList rooms;
-        rooms.reserve(arr.size());
-
-        for (const QJsonValue &v : arr)
-            rooms << v.toString();
-
-        emit statusChanged(QString("Rooms received: %1").arg(rooms.size()));
-        emit roomsUpdated(rooms);
-
+        QJsonObject roomsObj = obj.value("rooms").toObject();
+        QMap<QString, QStringList> roomUsers;
+        for (auto it = roomsObj.begin(); it != roomsObj.end(); ++it) {
+            QStringList users;
+            for (const QJsonValue &v : it.value().toArray())
+                users << v.toString();
+            roomUsers[it.key()] = users;
+        }
+        emit statusChanged(QString("Rooms received: %1").arg(roomUsers.size()));
+        emit roomsUpdated(roomUsers);
         return;
     }
 }
@@ -579,7 +653,7 @@ void VoiceChat::onUdpReadyRead()
             continue;
         }
 
-        if (audioMuted)
+        if (audioMuted || peer.locallyMuted)
             continue;
 
         qint64 bytesWritten = peer.output->write(pcmOut.constData(), samples * sizeof(opus_int16));
@@ -612,8 +686,6 @@ void VoiceChat::onAudioInputReady()
                                      OPUS_FRAME_SIZE,
                                      reinterpret_cast<unsigned char *>(encoded.data()),
                                      encoded.size());
-
-        qDebug() << "encoded =" << encodedLen;
 
         if (encodedLen > 0) {
             encoded.resize(encodedLen);

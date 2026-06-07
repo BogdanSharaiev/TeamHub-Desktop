@@ -1,4 +1,4 @@
-QT += widgets core websockets multimedia
+QT += widgets core websockets multimedia network
 CONFIG += c++17
 
 INCLUDEPATH += libs/include
@@ -13,6 +13,7 @@ win32 {
 
 SOURCES += \
     src/collab/collabsession.cpp \
+    src/debug/debugadapter.cpp \
     src/editor/codeeditor.cpp \
     src/editor/textsearch.cpp \
     src/filebrowser/filebrowser.cpp \
@@ -25,6 +26,7 @@ SOURCES += \
 
 HEADERS += \
     src/collab/collabsession.h \
+    src/debug/debugadapter.h \
     src/editor/codeeditor.h \
     src/editor/textsearch.h \
     src/filebrowser/filebrowser.h \

@@ -2,6 +2,7 @@
 
 #include <QApplication>
 #include <QButtonGroup>
+#include <QClipboard>
 #include <QCloseEvent>
 #include <QDialog>
 #include <QDir>
@@ -21,6 +22,7 @@
 #include <QRadioButton>
 #include <QRandomGenerator>
 #include <QSizePolicy>
+#include <QSplitter>
 #include <QStatusBar>
 #include <QTimer>
 #include <QToolBar>
@@ -60,15 +62,48 @@ MainWindow::MainWindow(QWidget *parent)
     connect(voiceChat, &VoiceChat::peerDisconnected, this, &MainWindow::onVoipPeerDisconnected);
 
     connect(voiceChat, &VoiceChat::peersUpdated, this, &MainWindow::onVoipPeersUpdated);
-    connect(voiceChat, &VoiceChat::roomsUpdated, this, [this](const QStringList &rooms) {
-        voipRoomsList->clear();
+    connect(voiceChat,
+            &VoiceChat::roomsUpdated,
+            this,
+            [this](const QMap<QString, QStringList> &roomUsers) {
+                QSet<QString> expanded;
+                for (int i = 0; i < voipTree->topLevelItemCount(); i++) {
+                    auto *it = voipTree->topLevelItem(i);
+                    if (it->isExpanded())
+                        expanded.insert(it->data(0, Qt::UserRole).toString());
+                }
 
-        for (const QString &r : rooms) {
-            voipRoomsList->addItem(r);
-        }
+                voipTree->clear();
 
-        outputPane->appendPlainText("[VoIP] Rooms updated: " + QString::number(rooms.size()));
-    });
+                for (auto it = roomUsers.cbegin(); it != roomUsers.cend(); ++it) {
+                    const QString &roomName = it.key();
+                    const QStringList &userIds = it.value();
+
+                    auto *roomItem = new QTreeWidgetItem(voipTree);
+                    roomItem->setText(0, u8"\U0001F50A " + roomName);
+                    roomItem->setData(0, Qt::UserRole, roomName);
+
+                    const bool isCurrent = (roomName == currentVoiceRoom);
+                    QFont f = roomItem->font(0);
+                    f.setBold(isCurrent);
+                    roomItem->setFont(0, f);
+                    if (isCurrent)
+                        roomItem->setForeground(0, QColor("#7fb3d3"));
+
+                    for (const QString &uid : userIds) {
+                        auto *userItem = new QTreeWidgetItem(roomItem);
+                        const int peerId = uid.toInt();
+                        const bool isMe = (peerId == voiceChat->id());
+                        const QString label = isMe ? QString("You")
+                                                   : voipNicknames.value(peerId, uid);
+                        userItem->setText(0, u8"\U0001F464 " + label);
+                        userItem->setForeground(0, isMe ? QColor("#7fb3d3") : QColor("#aaaaaa"));
+                        userItem->setData(0, Qt::UserRole, peerId);
+                    }
+
+                    roomItem->setExpanded(isCurrent || expanded.contains(roomName));
+                }
+            });
 }
 
 MainWindow::~MainWindow() = default;
@@ -77,8 +112,6 @@ void MainWindow::onVoipStatusChanged(const QString &status)
 {
     if (voipStatusLabel)
         voipStatusLabel->setText(status);
-
-    outputPane->appendPlainText("[VoIP] " + status);
 }
 
 void MainWindow::onVoipCallClicked()
@@ -94,21 +127,14 @@ void MainWindow::onVoipCallClicked()
 
 void MainWindow::onVoipPeerConnected(const QString &ip, quint16 port)
 {
-    if (voipPeersLabel)
-        voipPeersLabel->setText(QString("Peer: %1:%2 ✓").arg(ip).arg(port));
-
-    outputPane->appendPlainText(QString("[VoIP] P2P link up: %1:%2").arg(ip).arg(port));
+    Q_UNUSED(ip)
+    Q_UNUSED(port)
 }
 
 void MainWindow::onVoipPeerDisconnected(const QString &ip, quint16 port)
 {
     Q_UNUSED(ip)
     Q_UNUSED(port)
-
-    if (voipPeersLabel)
-        voipPeersLabel->setText("Peers: none");
-
-    outputPane->appendPlainText("[VoIP] Peer left");
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)
@@ -243,10 +269,9 @@ void MainWindow::setupMainToolBar()
     actRun->setToolTip("Run (F5)");
     actRun->setShortcut(QKeySequence("F5"));
 
-    auto *actDebug = tb->addAction("Debug");
-    actDebug->setToolTip("Start Debugging (F9)  —  stub");
-    actDebug->setShortcut(QKeySequence("F9"));
-    actDebug->setEnabled(false);
+    actDebugMain = tb->addAction("Debug", this, &MainWindow::startDebugging);
+    actDebugMain->setToolTip("Start/Stop Debugging (F9)");
+    actDebugMain->setShortcut(QKeySequence("F9"));
 
     tb->addSeparator();
 
@@ -267,8 +292,8 @@ void MainWindow::setupMainToolBar()
 }
 
 void MainWindow::startCollab(const QString &room,
-                              CollabSession::Mode mode,
-                              const QStringList &selectedFiles)
+                             CollabSession::Mode mode,
+                             const QStringList &selectedFiles)
 {
     stopAllCollab();
 
@@ -314,7 +339,7 @@ void MainWindow::startCollab(const QString &room,
             if (selectedFiles.contains(p))
                 filtered.append(p);
         allRelPaths = filtered;
-        for (auto jt = fileTexts.begin(); jt != fileTexts.end(); )
+        for (auto jt = fileTexts.begin(); jt != fileTexts.end();)
             jt = selectedFiles.contains(jt.key()) ? ++jt : fileTexts.erase(jt);
     }
 
@@ -571,9 +596,8 @@ void MainWindow::onCollabUsersUpdated(QList<int> siteIds)
     peerSiteIds = siteIds;
     refreshCollabUsersList();
     if (collabStatusLabel && !siteIds.isEmpty()) {
-        const QString role = (session && session->role() == CollabSession::Role::Host)
-                                 ? "Hosting"
-                                 : "Guest";
+        const QString role = (session && session->role() == CollabSession::Role::Host) ? "Hosting"
+                                                                                       : "Guest";
         collabStatusLabel->setText(QString("%1 — %2 user(s)").arg(role).arg(siteIds.size()));
     }
 }
@@ -922,9 +946,325 @@ void MainWindow::setupBottomDock()
     }
     bottomTabs->addTab(gitPane, "Git");
 
+    setupDebugPanel();
+
     bottomDock->setWidget(bottomTabs);
     addDockWidget(Qt::BottomDockWidgetArea, bottomDock);
     resizeDocks({bottomDock}, {180}, Qt::Vertical);
+}
+
+void MainWindow::setupDebugPanel()
+{
+    debugPane = new QWidget;
+    debugPane->setObjectName("debugPane");
+
+    auto *root = new QVBoxLayout(debugPane);
+    root->setContentsMargins(0, 2, 0, 0);
+    root->setSpacing(2);
+
+    auto *dbgBar = new QToolBar;
+    dbgBar->setMovable(false);
+    dbgBar->setStyleSheet(R"(
+        QToolBar {
+            background: #252526;
+            border: none;
+            spacing: 3px;
+            padding: 3px 6px;
+        }
+        QToolButton {
+            background: #3a3d41;
+            color: #d4d4d4;
+            border: 1px solid #555558;
+            border-radius: 4px;
+            padding: 4px 11px;
+            font-size: 12px;
+        }
+        QToolButton:hover {
+            background: #4a4d51;
+            border-color: #569cd6;
+            color: #ffffff;
+        }
+        QToolButton:pressed { background: #2a2d31; }
+        QToolButton:disabled { color: #555558; background: #2d2d2d; border-color: #3a3a3a; }
+        QToolBar::separator { background: #555558; width: 1px; margin: 4px 3px; }
+    )");
+
+    actDebugContinue = dbgBar->addAction(u8"▶  Continue", this, [this] {
+        if (debugAdapter)
+            debugAdapter->continueExec();
+    });
+    actDebugContinue->setShortcut(QKeySequence("F5"));
+    actDebugContinue->setToolTip("Continue (F5)");
+
+    actDebugStepOver = dbgBar->addAction(u8"↪  Step Over", this, [this] {
+        if (debugAdapter)
+            debugAdapter->stepOver();
+    });
+    actDebugStepOver->setShortcut(QKeySequence("F10"));
+    actDebugStepOver->setToolTip("Step Over (F10)");
+
+    actDebugStepIn = dbgBar->addAction(u8"↓  Step Into", this, [this] {
+        if (debugAdapter)
+            debugAdapter->stepIn();
+    });
+    actDebugStepIn->setShortcut(QKeySequence("F11"));
+    actDebugStepIn->setToolTip("Step Into (F11)");
+
+    actDebugStepOut = dbgBar->addAction(u8"↑  Step Out", this, [this] {
+        if (debugAdapter)
+            debugAdapter->stepOut();
+    });
+    actDebugStepOut->setShortcut(QKeySequence("Shift+F11"));
+    actDebugStepOut->setToolTip("Step Out (Shift+F11)");
+
+    dbgBar->addSeparator();
+
+    actDebugStop = dbgBar->addAction(u8"■  Stop", this, &MainWindow::stopDebugging);
+    actDebugStop->setShortcut(QKeySequence("Shift+F9"));
+    actDebugStop->setToolTip("Stop Debugging (Shift+F9)");
+
+    for (auto *a :
+         {actDebugContinue, actDebugStepOver, actDebugStepIn, actDebugStepOut, actDebugStop})
+        a->setEnabled(false);
+
+    if (auto *btn = qobject_cast<QToolButton *>(dbgBar->widgetForAction(actDebugContinue)))
+        btn->setStyleSheet("QToolButton { color: #4ec9b0; } "
+                           "QToolButton:hover { color: #6fdfc8; } "
+                           "QToolButton:disabled { color: #2a5a52; }");
+    if (auto *btn = qobject_cast<QToolButton *>(dbgBar->widgetForAction(actDebugStop)))
+        btn->setStyleSheet("QToolButton { color: #f48771; } "
+                           "QToolButton:hover { color: #ff9f8f; } "
+                           "QToolButton:disabled { color: #5a2a22; }");
+
+    root->addWidget(dbgBar);
+
+    auto *splitter = new QSplitter(Qt::Horizontal);
+
+    debugCallStack = new QTreeWidget;
+    debugCallStack->setObjectName("debugCallStack");
+    debugCallStack->setHeaderLabel("Call Stack");
+    debugCallStack->setRootIsDecorated(false);
+    connect(debugCallStack, &QTreeWidget::itemClicked, this, &MainWindow::onDebugCallStackClicked);
+    splitter->addWidget(debugCallStack);
+
+    debugVariables = new QTreeWidget;
+    debugVariables->setObjectName("debugVariables");
+    debugVariables->setColumnCount(2);
+    debugVariables->setHeaderLabels({"Name", "Value"});
+    debugVariables->setRootIsDecorated(true);
+    connect(debugVariables, &QTreeWidget::itemExpanded, this, &MainWindow::onDebugVariableExpanded);
+    splitter->addWidget(debugVariables);
+
+    splitter->setStretchFactor(0, 1);
+    splitter->setStretchFactor(1, 2);
+
+    root->addWidget(splitter, 1);
+
+    bottomTabs->addTab(debugPane, "Debug");
+}
+
+void MainWindow::startDebugging()
+{
+    if (debugAdapter && debugAdapter->isRunning()) {
+        stopDebugging();
+        return;
+    }
+
+    CodeEditor *ed = qobject_cast<CodeEditor *>(editorTabs->currentWidget());
+    if (!ed)
+        return;
+
+    const QString path = ed->getFilePath();
+    if (path.isEmpty()) {
+        outputPane->appendPlainText("[Debug] Save the file before debugging.");
+        bottomTabs->setCurrentWidget(outputPane);
+        return;
+    }
+
+    if (!path.endsWith(".py", Qt::CaseInsensitive)) {
+        outputPane->appendPlainText("[Debug] Debugger supports Python (.py) files only.");
+        bottomTabs->setCurrentWidget(outputPane);
+        return;
+    }
+
+    delete debugAdapter;
+    debugAdapter = new DebugAdapter(this);
+
+    connect(debugAdapter, &DebugAdapter::logMessage, this, [this](const QString &txt) {
+        outputPane->appendPlainText(txt.trimmed());
+    });
+    connect(debugAdapter, &DebugAdapter::stopped, this, &MainWindow::onDebugStopped);
+    connect(debugAdapter, &DebugAdapter::continued, this, &MainWindow::onDebugContinued);
+    connect(debugAdapter, &DebugAdapter::terminated, this, &MainWindow::onDebugTerminated);
+    connect(debugAdapter, &DebugAdapter::callStackReady, this, &MainWindow::onDebugCallStackReady);
+    connect(debugAdapter, &DebugAdapter::variablesReady, this, &MainWindow::onDebugVariablesReady);
+    connect(debugAdapter,
+            &DebugAdapter::subVariablesReady,
+            this,
+            &MainWindow::onDebugSubVariablesReady);
+    connect(ed, &CodeEditor::breakpointsChanged, debugAdapter, &DebugAdapter::updateBreakpoints);
+
+    for (auto *a :
+         {actDebugContinue, actDebugStepOver, actDebugStepIn, actDebugStepOut, actDebugStop})
+        a->setEnabled(false);
+
+    actDebugStop->setEnabled(true);
+    actDebugMain->setText("Stop Debug");
+
+    outputPane->appendPlainText(QString("[Debug] Starting: %1").arg(path));
+    outputPane->appendPlainText("[Debug] Install debugpy if missing:  pip install debugpy");
+    bottomTabs->setCurrentWidget(outputPane);
+
+    debugAdapter->startDebugging(path, ed->breakpoints());
+}
+
+void MainWindow::stopDebugging()
+{
+    if (debugAdapter)
+        debugAdapter->stop();
+}
+
+void MainWindow::onDebugStopped(const QString &filePath, int line, const QString &)
+{
+    clearDebugHighlights();
+
+    auto normPath = [](const QString &p) {
+        return QDir::cleanPath(QDir::fromNativeSeparators(p)).toLower();
+    };
+    const QString stoppedNorm = normPath(filePath);
+
+    for (int i = 0; i < editorTabs->count(); ++i) {
+        auto *ed = qobject_cast<CodeEditor *>(editorTabs->widget(i));
+        if (!ed)
+            continue;
+        if (normPath(ed->getFilePath()) == stoppedNorm) {
+            editorTabs->setCurrentIndex(i);
+            ed->setDebugLine(line);
+            break;
+        }
+    }
+
+    for (auto *a : {actDebugContinue, actDebugStepOver, actDebugStepIn, actDebugStepOut})
+        a->setEnabled(true);
+
+    bottomTabs->setCurrentWidget(debugPane);
+}
+
+void MainWindow::onDebugContinued()
+{
+    clearDebugHighlights();
+    for (auto *a : {actDebugContinue, actDebugStepOver, actDebugStepIn, actDebugStepOut})
+        a->setEnabled(false);
+}
+
+void MainWindow::onDebugTerminated()
+{
+    clearDebugHighlights();
+    for (auto *a :
+         {actDebugContinue, actDebugStepOver, actDebugStepIn, actDebugStepOut, actDebugStop})
+        a->setEnabled(false);
+
+    actDebugMain->setText("Debug");
+    debugCallStack->clear();
+    debugVariables->clear();
+    outputPane->appendPlainText("[Debug] Session ended.");
+    bottomTabs->setCurrentWidget(outputPane);
+}
+
+void MainWindow::onDebugCallStackReady(const QList<DebugAdapter::FrameInfo> &frames)
+{
+    debugCallStack->clear();
+    for (const auto &f : frames) {
+        auto *item = new QTreeWidgetItem(debugCallStack, {f.label});
+        item->setData(0, Qt::UserRole, f.frameId);
+    }
+}
+
+void MainWindow::onDebugCallStackClicked(QTreeWidgetItem *item, int)
+{
+    if (!debugAdapter || !debugAdapter->isRunning())
+        return;
+    const QVariant d = item->data(0, Qt::UserRole);
+    if (!d.isValid())
+        return;
+    const int frameId = d.toInt();
+    if (frameId >= 0)
+        debugAdapter->requestFrameVariables(frameId);
+}
+
+static QTreeWidgetItem *dbgFindByRef(QTreeWidgetItem *parent, int ref)
+{
+    for (int i = 0; i < parent->childCount(); ++i) {
+        auto *it = parent->child(i);
+        if (it->data(0, Qt::UserRole).toInt() == ref)
+            return it;
+        auto *found = dbgFindByRef(it, ref);
+        if (found)
+            return found;
+    }
+    return nullptr;
+}
+
+static QTreeWidgetItem *dbgMakeVarItem(const DebugAdapter::Var &v, QTreeWidgetItem *parent)
+{
+    auto *item = new QTreeWidgetItem(parent, {v.name, v.value});
+    item->setData(0, Qt::UserRole, v.ref);
+    if (v.ref > 0)
+        new QTreeWidgetItem(item);
+    return item;
+}
+
+void MainWindow::onDebugVariablesReady(const QList<DebugAdapter::Var> &vars)
+{
+    debugVariables->clear();
+
+    static const QStringList kCollapsed = {"special variables",
+                                           "function variables",
+                                           "protected variables",
+                                           "class variables"};
+
+    for (const auto &v : vars) {
+        auto *item = dbgMakeVarItem(v, debugVariables->invisibleRootItem());
+        debugVariables->addTopLevelItem(item);
+        if (kCollapsed.contains(v.name.toLower()))
+            item->setExpanded(false);
+    }
+    debugVariables->resizeColumnToContents(0);
+}
+
+void MainWindow::onDebugSubVariablesReady(int parentRef, const QList<DebugAdapter::Var> &vars)
+{
+    auto *parent = dbgFindByRef(debugVariables->invisibleRootItem(), parentRef);
+    if (!parent)
+        return;
+
+    qDeleteAll(parent->takeChildren());
+
+    for (const auto &v : vars)
+        dbgMakeVarItem(v, parent);
+
+    debugVariables->resizeColumnToContents(0);
+}
+
+void MainWindow::onDebugVariableExpanded(QTreeWidgetItem *item)
+{
+    const int ref = item->data(0, Qt::UserRole).toInt();
+    if (ref <= 0)
+        return;
+
+    if (item->childCount() == 1 && item->child(0)->text(0).isEmpty()) {
+        if (debugAdapter)
+            debugAdapter->requestSubVariables(ref);
+    }
+}
+
+void MainWindow::clearDebugHighlights()
+{
+    for (int i = 0; i < editorTabs->count(); ++i) {
+        auto *ed = qobject_cast<CodeEditor *>(editorTabs->widget(i));
+        if (ed)
+            ed->clearDebugLine();
+    }
 }
 
 void MainWindow::setupVoipDock()
@@ -943,29 +1283,17 @@ void MainWindow::setupVoipDock()
     voipStatusLabel->setObjectName("stubLabel");
     root->addWidget(voipStatusLabel);
 
-    voipPeersLabel = new QLabel("Peers: none");
-    voipPeersLabel->setObjectName("stubLabel");
-    root->addWidget(voipPeersLabel);
-
-    auto *roomsHeader = new QLabel("ROOMS");
-    roomsHeader->setObjectName("stubLabel");
-    root->addWidget(roomsHeader);
-
-    voipRoomsList = new QListWidget;
-    voipRoomsList->setObjectName("voipRoomsList");
-    root->addWidget(voipRoomsList, 2);
+    voipTree = new QTreeWidget;
+    voipTree->setObjectName("voipTree");
+    voipTree->setHeaderHidden(true);
+    voipTree->setIndentation(16);
+    voipTree->setRootIsDecorated(true);
+    voipTree->setExpandsOnDoubleClick(false);
+    root->addWidget(voipTree, 1);
 
     btnCreateRoom = new QPushButton("Create Room");
     btnCreateRoom->setObjectName("voipBtn");
     root->addWidget(btnCreateRoom);
-
-    auto *usersHeader = new QLabel("USERS");
-    usersHeader->setObjectName("stubLabel");
-    root->addWidget(usersHeader);
-
-    voipUsersList = new QListWidget;
-    voipUsersList->setObjectName("voipUsersList");
-    root->addWidget(voipUsersList, 3);
 
     auto *controls = new QFrame;
     controls->setObjectName("voipControls");
@@ -1251,11 +1579,20 @@ QPushButton#voipBtn {
 QPushButton#voipBtn:hover   { background: #505050; }
 QPushButton#voipBtn:pressed { background: #007acc; }
 QPushButton#voipBtn:disabled { color: #555555; }
-QListWidget#voipRoomsList,
-QListWidget#voipUsersList {
+QTreeWidget#voipTree {
     background: #1e1e1e;
     color: #d4d4d4;
     border: 1px solid #333;
+}
+QTreeWidget#voipTree::item {
+    padding: 3px 0;
+}
+QTreeWidget#voipTree::item:selected {
+    background: #094771;
+    color: #ffffff;
+}
+QTreeWidget#voipTree::item:hover {
+    background: #2a2d2e;
 }
 
 QFrame#voipControls {
@@ -1566,19 +1903,38 @@ void MainWindow::toggleVoipDock()
 
     btnVoip->setChecked(willShow);
 
-    if (willShow && !voiceChat->isConnected()) {
-        voiceChat->connectToServer("localhost", 9000);
-
-        outputPane->appendPlainText("[VoIP] Connecting...");
+    if (willShow) {
+        if (!voiceChat->isConnected())
+            voiceChat->connectToServer("localhost", 9000);
+        else
+            voiceChat->requestRooms();
     }
 }
 
 void MainWindow::onVoipPeersUpdated(const QStringList &ids)
 {
-    voipUsersList->clear();
+    for (int i = 0; i < voipTree->topLevelItemCount(); i++) {
+        auto *roomItem = voipTree->topLevelItem(i);
+        if (roomItem->data(0, Qt::UserRole).toString() != currentVoiceRoom)
+            continue;
 
-    for (const QString &id : ids) {
-        voipUsersList->addItem("User ID: " + id);
+        qDeleteAll(roomItem->takeChildren());
+
+        auto *meItem = new QTreeWidgetItem(roomItem);
+        meItem->setText(0, u8"\U0001F464 You");
+        meItem->setForeground(0, QColor("#7fb3d3"));
+        meItem->setData(0, Qt::UserRole, voiceChat->id());
+
+        for (const QString &uid : ids) {
+            auto *userItem = new QTreeWidgetItem(roomItem);
+            const int peerId = uid.toInt();
+            userItem->setText(0, u8"\U0001F464 " + voipNicknames.value(peerId, uid));
+            userItem->setForeground(0, QColor("#aaaaaa"));
+            userItem->setData(0, Qt::UserRole, peerId);
+        }
+
+        roomItem->setExpanded(true);
+        return;
     }
 }
 
@@ -1593,58 +1949,126 @@ void MainWindow::setupVoipConnections()
         joinRoom(room);
     });
 
-    connect(voipRoomsList, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *item) {
-        joinRoom(item->text());
+    connect(voipTree, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item, int) {
+        if (!item->parent())
+            joinRoom(item->data(0, Qt::UserRole).toString());
     });
 
     connect(btnMuteMic, &QPushButton::toggled, this, [this](bool on) {
         micMuted = on;
         voiceChat->setMicMuted(on);
-        outputPane->appendPlainText(on ? "[VoIP] Mic muted" : "[VoIP] Mic unmuted");
     });
 
     connect(btnDeafen, &QPushButton::toggled, this, [this](bool on) {
         audioMuted = on;
         voiceChat->setAudioMuted(on);
-        outputPane->appendPlainText(on ? "[VoIP] Audio muted" : "[VoIP] Audio unmuted");
     });
 
     connect(btnLeave, &QPushButton::clicked, this, [this]() {
         voiceChat->disconnectFromServer();
-        voipUsersList->clear();
+        voipTree->clear();
+        currentVoiceRoom.clear();
         outputPane->appendPlainText("[VoIP] Left room");
+    });
+
+    connect(voiceChat, &VoiceChat::voipKicked, this, [this]() {
+        voipTree->clear();
+        currentVoiceRoom.clear();
+        voipStatusLabel->setText("Kicked from room");
+        outputPane->appendPlainText("[VoIP] You were kicked from the room");
+    });
+
+    voipTree->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(voipTree, &QTreeWidget::customContextMenuRequested, this, [this](const QPoint &pos) {
+        QTreeWidgetItem *item = voipTree->itemAt(pos);
+        if (!item || !item->parent())
+            return;
+
+        const int peerId = item->data(0, Qt::UserRole).toInt();
+        if (peerId == voiceChat->id())
+            return;
+
+        QMenu menu(voipTree);
+
+        const bool muted = voiceChat->isPeerMuted(peerId);
+        menu.addAction(muted ? "Unmute" : "Mute for me", [this, peerId, muted]() {
+            voiceChat->setPeerMuted(peerId, !muted);
+            voipStatusLabel->setText(muted ? "Unmuted peer" : "Muted peer locally");
+        });
+
+        menu.addSeparator();
+
+        auto *volWidget = new QWidget;
+        auto *volLayout = new QHBoxLayout(volWidget);
+        volLayout->setContentsMargins(8, 4, 8, 4);
+        volLayout->addWidget(new QLabel("Volume:"));
+        auto *slider = new QSlider(Qt::Horizontal);
+        slider->setRange(0, 200);
+        slider->setValue(qRound(voiceChat->peerVolume(peerId) * 100));
+        slider->setFixedWidth(120);
+        connect(slider, &QSlider::valueChanged, this, [this, peerId](int val) {
+            voiceChat->setPeerVolume(peerId, val / 100.0f);
+        });
+        volLayout->addWidget(slider);
+        auto *volAction = new QWidgetAction(&menu);
+        volAction->setDefaultWidget(volWidget);
+        menu.addAction(volAction);
+
+        menu.addSeparator();
+
+        const QString currentNick = voipNicknames.value(peerId, QString::number(peerId));
+        menu.addAction("Set nickname", [this, peerId, currentNick, item]() {
+            bool ok;
+            const QString nick = QInputDialog::getText(this,
+                                                       "Set Nickname",
+                                                       "Nickname:",
+                                                       QLineEdit::Normal,
+                                                       currentNick,
+                                                       &ok);
+            if (!ok)
+                return;
+            if (nick.isEmpty())
+                voipNicknames.remove(peerId);
+            else
+                voipNicknames[peerId] = nick;
+            item->setText(0, u8"\U0001F464 " + voipNicknames.value(peerId, QString::number(peerId)));
+        });
+
+        menu.addAction("Copy ID",
+                       [peerId]() { QApplication::clipboard()->setText(QString::number(peerId)); });
+
+        if (voiceChat->isHost()) {
+            menu.addSeparator();
+            menu.addAction("Kick from room", [this, peerId]() { voiceChat->kickPeer(peerId); });
+        }
+
+        menu.exec(voipTree->viewport()->mapToGlobal(pos));
     });
 }
 
 void MainWindow::addRoom(const QString &room)
 {
-    bool exists = false;
-
-    for (int i = 0; i < voipRoomsList->count(); i++) {
-        if (voipRoomsList->item(i)->text() == room) {
-            exists = true;
-            break;
-        }
+    for (int i = 0; i < voipTree->topLevelItemCount(); i++) {
+        if (voipTree->topLevelItem(i)->data(0, Qt::UserRole).toString() == room)
+            return;
     }
 
-    if (!exists) {
-        voipRoomsList->addItem(room);
-    }
+    auto *roomItem = new QTreeWidgetItem(voipTree);
+    roomItem->setText(0, u8"\U0001F50A " + room);
+    roomItem->setData(0, Qt::UserRole, room);
+    roomItem->setExpanded(true);
 }
 
 void MainWindow::onSessionProjectInit(int /*hostSiteId*/, const QStringList &files)
 {
     const bool readOnly = session && session->collabMode() == CollabSession::Mode::ReadOnly;
-    outputPane->appendPlainText(
-        QString("[Collab] Project received — %1 file(s)%2")
-            .arg(files.size())
-            .arg(readOnly ? " (read-only)" : ""));
+    outputPane->appendPlainText(QString("[Collab] Project received — %1 file(s)%2")
+                                    .arg(files.size())
+                                    .arg(readOnly ? " (read-only)" : ""));
 
     if (collabStatusLabel) {
         collabStatusLabel->setText(
-            QString("Guest — %1 file(s)%2")
-                .arg(files.size())
-                .arg(readOnly ? " · read-only" : ""));
+            QString("Guest — %1 file(s)%2").arg(files.size()).arg(readOnly ? " · read-only" : ""));
     }
 
     fileBrowser->setRemoteFiles(files);
@@ -1687,13 +2111,11 @@ void MainWindow::joinRoom(const QString &room)
         return;
 
     if (currentVoiceRoom == room && voiceChat->isConnected()) {
-        outputPane->appendPlainText("[VoIP] Already in room: " + room);
         return;
     }
 
     joiningVoiceRoom = true;
     currentVoiceRoom = room;
-    voipUsersList->clear();
 
     disconnect(voiceChat, &VoiceChat::connectedToServer, this, nullptr);
 
@@ -1704,7 +2126,6 @@ void MainWindow::joinRoom(const QString &room)
         [this]() {
             if (!voiceChat->isCallActive()) {
                 voiceChat->startCall();
-                outputPane->appendPlainText("[VoIP] Voice stream started");
             }
             joiningVoiceRoom = false;
         },
@@ -1765,11 +2186,9 @@ bool MainWindow::showStartCollabDialog()
         populate = [&populate](QTreeWidgetItem *parent,
                                const QString &absPath,
                                const QString &relPath) {
-            const QStringList filters
-                = {"*.py", "*.cpp", "*.h", "*.pro", "*.txt", "*.md", "*.json"};
+            const QStringList filters = {"*.py", "*.cpp", "*.h", "*.pro", "*.txt", "*.md", "*.json"};
             QDir dir(absPath);
-            for (const QString &sub :
-                 dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
+            for (const QString &sub : dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
                 const QString subRel = relPath.isEmpty() ? sub : relPath + "/" + sub;
                 auto *item = new QTreeWidgetItem(parent, {sub});
                 item->setCheckState(0, Qt::Checked);
@@ -1803,7 +2222,8 @@ bool MainWindow::showStartCollabDialog()
                             cascade(p->child(i), s);
                         }
                     };
-                    cascade(item, item->checkState(0) != Qt::Unchecked ? Qt::Checked : Qt::Unchecked);
+                    cascade(item,
+                            item->checkState(0) != Qt::Unchecked ? Qt::Checked : Qt::Unchecked);
                     fileTree->blockSignals(false);
                 });
     } else {
@@ -1877,9 +2297,8 @@ void MainWindow::onCollabUserContextMenu(const QPoint &pos)
             return;
 
         const bool isGuest = session->role() == CollabSession::Role::Guest;
-        const QString openPath = isGuest
-            ? relPath
-            : QDir(session->projectRoot()).absoluteFilePath(relPath);
+        const QString openPath = isGuest ? relPath
+                                         : QDir(session->projectRoot()).absoluteFilePath(relPath);
 
         setSidePanelPage(0);
 

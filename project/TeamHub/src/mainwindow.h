@@ -6,16 +6,20 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QMainWindow>
+#include <QMap>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRandomGenerator>
+#include <QSlider>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QTabWidget>
 #include <QToolButton>
 #include <QTreeWidget>
+#include <QWidgetAction>
 
 #include "collab/collabsession.h"
+#include "debug/debugadapter.h"
 #include "editor/codeeditor.h"
 #include "filebrowser/filebrowser.h"
 #include "terminal/terminal.h"
@@ -62,6 +66,7 @@ private:
     QPlainTextEdit *terminalPane;
     Terminal *terminal;
     QWidget *gitPane;
+    QWidget *debugPane;
     QDockWidget *voipDock;
 
     //Status Bar
@@ -87,21 +92,29 @@ private:
     QList<int> peerSiteIds;
     QString currentCollabFile;
 
+    // Debug
+    DebugAdapter *debugAdapter = nullptr;
+    QTreeWidget *debugCallStack = nullptr;
+    QTreeWidget *debugVariables = nullptr;
+    QAction *actDebugContinue = nullptr;
+    QAction *actDebugStepOver = nullptr;
+    QAction *actDebugStepIn = nullptr;
+    QAction *actDebugStepOut = nullptr;
+    QAction *actDebugStop = nullptr;
+    QAction *actDebugMain = nullptr;
+
     // Voice
     VoiceChat *voiceChat;
     QLabel *voipStatusLabel;
-    QLabel *voipPeersLabel;
     QPushButton *voipCallBtn;
-    QLineEdit *voipRoomEdit;
-    QPushButton *voipJoinRoomBtn;
-    QListWidget *voipUsersList;
-    QListWidget *voipRoomsList;
+    QTreeWidget *voipTree;
     QPushButton *btnMuteMic;
     QPushButton *btnDeafen;
     QPushButton *btnLeave;
     QPushButton *btnCreateRoom;
     bool micMuted = false;
     bool audioMuted = false;
+    QMap<int, QString> voipNicknames;
 
     //Setup UI
     void setupMenuBar();
@@ -111,6 +124,7 @@ private:
     void setupLeftPanel();
     void setupEditorArea();
     void setupBottomDock();
+    void setupDebugPanel();
     void setupVoipDock();
     void setupVoipConnections();
     void setupStatusBar();
@@ -149,6 +163,8 @@ private slots:
     void openFile();
     void openFolder();
     void runFile();
+    void startDebugging();
+    void stopDebugging();
     bool saveFile();
     bool saveFileAs();
 
@@ -175,6 +191,16 @@ private slots:
     void onVoipPeersUpdated(const QStringList &ids);
 
     void onCollabUserContextMenu(const QPoint &pos);
+
+    void onDebugStopped(const QString &filePath, int line, const QString &reason);
+    void onDebugContinued();
+    void onDebugTerminated();
+    void onDebugVariablesReady(const QList<DebugAdapter::Var> &vars);
+    void onDebugSubVariablesReady(int parentRef, const QList<DebugAdapter::Var> &vars);
+    void onDebugVariableExpanded(QTreeWidgetItem *item);
+    void onDebugCallStackReady(const QList<DebugAdapter::FrameInfo> &frames);
+    void onDebugCallStackClicked(QTreeWidgetItem *item, int column);
+    void clearDebugHighlights();
 };
 
 #endif // MAINWINDOW_H

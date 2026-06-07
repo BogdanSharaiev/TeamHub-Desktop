@@ -4,6 +4,7 @@ import websockets
 
 rooms = {}
 clients = {}
+room_host: dict[str, int] = {}
 
 
 async def broadcast_room(room):
@@ -12,7 +13,8 @@ async def broadcast_room(room):
 
     msg = json.dumps({
         "type": "peer_list",
-        "peers": rooms[room]["peers"]
+        "peers": rooms[room]["peers"],
+        "host_id": room_host.get(room, -1),
     })
 
     for ws, info in clients.items():
@@ -23,15 +25,27 @@ async def broadcast_room(room):
                 pass
 
 
+def _build_rooms_payload():
+    room_info = {}
+    for room_name, room_data in rooms.items():
+        room_info[room_name] = [str(p["id"]) for p in room_data.get("peers", [])]
+    return json.dumps({"type": "rooms_list", "rooms": room_info})
+
+
 async def send_rooms_list(websocket):
-    msg = json.dumps({
-        "type": "rooms_list",
-        "rooms": list(rooms.keys())
-    })
     try:
-        await websocket.send(msg)
+        await websocket.send(_build_rooms_payload())
     except:
         pass
+
+
+async def broadcast_rooms_list_all():
+    msg = _build_rooms_payload()
+    for ws in list(clients.keys()):
+        try:
+            await ws.send(msg)
+        except:
+            pass
 
 
 async def relay_audio(room, sender_ws, data):
@@ -62,14 +76,13 @@ async def handle_client(websocket):
                 continue
 
             if msg_type in ["register", "join"]:
-
                 room = data.get("room", "default")
 
                 peer = {
                     "ip": data["ip"],
                     "port": data["port"],
                     "id": data["id"],
-                    "mode": data.get("mode", "hybrid")
+                    "mode": data.get("mode", "hybrid"),
                 }
 
                 clients[websocket] = {
@@ -77,11 +90,12 @@ async def handle_client(websocket):
                     "id": data["id"],
                     "ip": data["ip"],
                     "port": data["port"],
-                    "mode": data.get("mode", "hybrid")
+                    "mode": data.get("mode", "hybrid"),
                 }
 
                 if room not in rooms:
                     rooms[room] = {"peers": []}
+                    room_host[room] = peer["id"]
 
                 rooms[room]["peers"] = [
                     p for p in rooms[room]["peers"]
@@ -90,8 +104,26 @@ async def handle_client(websocket):
                 rooms[room]["peers"].append(peer)
 
                 await broadcast_room(room)
-                await send_rooms_list(websocket)
-            elif msg_type == "mode":
+                await broadcast_rooms_list_all()
+                continue
+
+            if msg_type == "voip_kick":
+                sender_id = clients.get(websocket, {}).get("id")
+                sender_room = clients.get(websocket, {}).get("room")
+                if room_host.get(sender_room) != sender_id:
+                    continue
+                target_id = data.get("target")
+                for ws, info in list(clients.items()):
+                    if info["id"] == target_id and info["room"] == sender_room:
+                        try:
+                            await ws.send(json.dumps({"type": "voip_kicked"}))
+                            await ws.close(1000, "kicked")
+                        except:
+                            pass
+                        break
+                continue
+
+            if msg_type == "mode":
                 if websocket in clients:
                     clients[websocket]["mode"] = data["mode"]
 
@@ -110,7 +142,15 @@ async def handle_client(websocket):
                     if p["id"] != pid
                 ]
 
+                if room_host.get(room) == pid:
+                    remaining = rooms[room].get("peers", [])
+                    if remaining:
+                        room_host[room] = remaining[0]["id"]
+                    else:
+                        room_host.pop(room, None)
+
                 await broadcast_room(room)
+                await broadcast_rooms_list_all()
 
 
 async def main():

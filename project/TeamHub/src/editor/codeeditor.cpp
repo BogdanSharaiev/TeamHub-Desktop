@@ -80,6 +80,10 @@ CodeEditor::CodeEditor(QWidget *parent)
     connect(this, SIGNAL(textChanged()), this, SIGNAL(fileModified()));
     connect(this, SIGNAL(cursorPositionChanged(int, int)), this, SLOT(onCursorChanged(int, int)));
     connect(this, SIGNAL(modificationChanged(bool)), this, SLOT(onModified(bool)));
+    connect(this,
+            SIGNAL(marginClicked(int, int, Qt::KeyboardModifiers)),
+            this,
+            SLOT(onMarginClicked(int, int, Qt::KeyboardModifiers)));
 }
 
 void CodeEditor::setupLexer()
@@ -114,8 +118,20 @@ void CodeEditor::setupMargins()
     setMarginLineNumbers(0, true);
 
     setMarginType(1, QsciScintilla::SymbolMargin);
-    setMarginWidth(1, 14);
+    setMarginWidth(1, 16);
     setMarginSensitivity(1, true);
+    setMarginMarkerMask(1, (1 << MARKER_BREAKPOINT) | (1 << MARKER_DEBUG_LINE));
+
+    markerDefine(QsciScintilla::Circle, MARKER_BREAKPOINT);
+    setMarkerBackgroundColor(QColor("#c51500"), MARKER_BREAKPOINT);
+    setMarkerForegroundColor(QColor("#ffffff"), MARKER_BREAKPOINT);
+
+    markerDefine(QsciScintilla::RightArrow, MARKER_DEBUG_LINE);
+    setMarkerBackgroundColor(QColor("#ffcc00"), MARKER_DEBUG_LINE);
+    setMarkerForegroundColor(QColor("#1e1e1e"), MARKER_DEBUG_LINE);
+
+    markerDefine(QsciScintilla::Background, MARKER_DEBUG_BG);
+    setMarkerBackgroundColor(QColor("#2d2800"), MARKER_DEBUG_BG);
 }
 
 void CodeEditor::setupEditor()
@@ -1064,5 +1080,43 @@ void CodeEditor::paintRemoteCursors(QWidget *overlay)
             painter.setPen(Qt::white);
             painter.drawText(QRect(x, labelY, labelW, labelH), Qt::AlignCenter, label);
         }
+    }
+}
+
+void CodeEditor::onMarginClicked(int margin, int line, Qt::KeyboardModifiers)
+{
+    if (margin == 1)
+        toggleBreakpoint(line);
+}
+
+void CodeEditor::toggleBreakpoint(int line)
+{
+    if (breakpointSet.contains(line)) {
+        markerDelete(line, MARKER_BREAKPOINT);
+        breakpointSet.remove(line);
+    } else {
+        if (text(line).trimmed().isEmpty())
+            return;
+        markerAdd(line, MARKER_BREAKPOINT);
+        breakpointSet.insert(line);
+    }
+    emit breakpointsChanged(breakpointSet);
+}
+
+void CodeEditor::setDebugLine(int line)
+{
+    clearDebugLine();
+    debugLine = line;
+    markerAdd(line, MARKER_DEBUG_LINE);
+    markerAdd(line, MARKER_DEBUG_BG);
+    ensureLineVisible(line);
+}
+
+void CodeEditor::clearDebugLine()
+{
+    if (debugLine >= 0) {
+        markerDelete(debugLine, MARKER_DEBUG_LINE);
+        markerDelete(debugLine, MARKER_DEBUG_BG);
+        debugLine = -1;
     }
 }

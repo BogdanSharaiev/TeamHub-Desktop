@@ -8,6 +8,7 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QProcess>
+#include <QSet>
 #include <QString>
 #include <QTimer>
 #include <QToolTip>
@@ -21,6 +22,10 @@ class CodeEditor : public QsciScintilla
 
 public:
     enum class Theme { Dark, Light };
+
+    static constexpr int MARKER_BREAKPOINT = 0;
+    static constexpr int MARKER_DEBUG_LINE = 1;
+    static constexpr int MARKER_DEBUG_BG = 2;
 
     explicit CodeEditor(QWidget *parent = nullptr);
 
@@ -39,6 +44,11 @@ public:
     void showSearch();
     void hideSearch();
 
+    void toggleBreakpoint(int line);
+    void setDebugLine(int line);
+    void clearDebugLine();
+    const QSet<int> &breakpoints() const { return breakpointSet; }
+
     bool applyingRemote = false;
     bool collabActive = false;
 
@@ -51,6 +61,8 @@ public slots:
     void applyLightTheme();
     void onModified(bool modified);
     void onCharAdded(int ch);
+
+    void onMarginClicked(int margin, int line, Qt::KeyboardModifiers state);
 
     void onFindNext(const QString &text);
     void onFindPrev(const QString &text);
@@ -78,6 +90,7 @@ signals:
     void redoRequested();
     void beginUndoGroup();
     void endUndoGroup();
+    void breakpointsChanged(const QSet<int> &lines);
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
@@ -124,6 +137,8 @@ private:
     int zoomLevel;
     QProcess *lintProcess;
     QTimer *lintTimer;
+    QSet<int> breakpointSet;
+    int debugLine = -1;
 
     TextSearch *textSearch;
     void updateSearchHighlights(const QString &text);

@@ -6,6 +6,7 @@
 #include <QHostInfo>
 #include <QIODevice>
 #include <QJsonArray>
+#include <QMap>
 #include <QNetworkInterface>
 #include <QObject>
 #include <QRandomGenerator>
@@ -26,6 +27,8 @@ struct PeerInfo
     QAudioSink *sink = nullptr;
     QIODevice *output = nullptr;
     OpusDecoder *decoder = nullptr;
+    bool locallyMuted = false;
+    float localVolume = 1.0f;
 };
 
 class VoiceChat : public QObject
@@ -43,6 +46,15 @@ public:
     bool isCallActive() const;
     bool isConnected() const;
     void setRoom(const QString &r);
+    int id() const { return publicId; }
+    bool isHost() const { return isRoomHost_; }
+    void requestRooms();
+
+    void setPeerMuted(int peerId, bool muted);
+    void setPeerVolume(int peerId, float volume);
+    bool isPeerMuted(int peerId) const;
+    float peerVolume(int peerId) const;
+    void kickPeer(int peerId);
 
     bool micMuted = false;
     bool audioMuted = false;
@@ -51,13 +63,15 @@ public:
     void setAudioMuted(bool m) { audioMuted = m; }
 
 signals:
+    void hostStatusChanged(bool isHost);
+    void voipKicked();
     void statusChanged(const QString &status);
     void peerConnected(const QString &ip, quint16 port);
     void peerDisconnected(const QString &ip, quint16 port);
     void connectedToServer();
     void disconnectedFromServer();
     void peersUpdated(const QStringList &ids);
-    void roomsUpdated(const QStringList &rooms);
+    void roomsUpdated(const QMap<QString, QStringList> &roomUsers);
 
 private slots:
     void onUdpReadyRead();
@@ -106,6 +120,7 @@ private:
 
     QString room = "default";
     QString mode = "hybrid"; // relay / hybrid / p2p
+    bool isRoomHost_ = false;
 };
 
 #endif // VOICECHAT_H
