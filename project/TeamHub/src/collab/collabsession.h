@@ -11,6 +11,7 @@
 
 #include "../rga/rgamanager.h"
 #include "../rga/rgaseq.h"
+#include "sessionreport.h"
 
 class CollabSession : public QObject
 {
@@ -39,6 +40,8 @@ public:
     void sendCursorLeave(const QString &relPath);
     void sendFileFocus(const QString &relPath);
     void kickUser(int siteId);
+    void requestSessionReport();
+    void endSession();
 
     Role role() const { return role_; }
     Mode collabMode() const { return mode_; }
@@ -63,6 +66,8 @@ signals:
     void remoteFileDeleted(const QString &relPath);
     void remoteFileRenamed(const QString &oldPath, const QString &newPath);
     void remoteFileFocusChanged(int siteId, const QString &file);
+    void sessionReportReady(const SessionReportData &report);
+    void sessionAiInsightsReady(const AiInsights &ai);
 
 private slots:
     void onConnected();
@@ -82,6 +87,9 @@ private:
     void sendRegister();
     void evictLRU();
     void applyOpToInactive(const QString &file, const QJsonObject &op);
+
+    static SessionReportData parseSessionReport(const QJsonObject &data);
+    static AiInsights parseAiInsights(const QJsonObject &data);
 
     static constexpr int MAX_ACTIVE = 5;
 

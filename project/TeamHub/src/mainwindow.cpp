@@ -38,6 +38,8 @@ MainWindow::MainWindow(QWidget *parent)
     resize(1400, 900);
     setMinimumSize(800, 500);
 
+    voiceChat = new VoiceChat(this);
+
     setupMenuBar();
     setupMainToolBar();
     setupCentralWidget();
@@ -45,6 +47,9 @@ MainWindow::MainWindow(QWidget *parent)
     setupVoipDock();
     setupStatusBar();
     applyTheme();
+
+    if (gitPanel_ && !fileBrowser->rootPath().isEmpty())
+        gitPanel_->setRepoPath(fileBrowser->rootPath());
 
     setSidePanelPage(0);
     btnFiles->setChecked(true);
@@ -54,8 +59,6 @@ MainWindow::MainWindow(QWidget *parent)
 
     outputPane->appendPlainText("[TeamHub] Ready.");
     updateWindowTitle();
-
-    voiceChat = new VoiceChat(this);
 
     connect(voiceChat, &VoiceChat::statusChanged, this, &MainWindow::onVoipStatusChanged);
     connect(voiceChat, &VoiceChat::peerConnected, this, &MainWindow::onVoipPeerConnected);
@@ -227,24 +230,82 @@ void MainWindow::setupMenuBar()
     themeMenu->addAction("Light", this, [this] { editor->setTheme(CodeEditor::Theme::Light); });
 
     QMenu *gitMenu = menuBar()->addMenu("&Git");
-    for (auto *a : {
-             gitMenu->addAction("Init Repository"),
-             gitMenu->addAction("Clone..."),
-         })
-        a->setEnabled(false);
+
+    gitMenu->addAction("Init Repository", this, [this]() {
+        if (!gitPanel_)
+            return;
+        const QString path = fileBrowser->rootPath().isEmpty()
+                                 ? QFileDialog::getExistingDirectory(this, "Select Project Folder")
+                                 : fileBrowser->rootPath();
+        if (!path.isEmpty()) {
+            gitPanel_->initRepo(path);
+            bottomTabs->setCurrentWidget(gitPane);
+            bottomDock->setVisible(true);
+        }
+    });
+
     gitMenu->addSeparator();
-    for (auto *a : {
-             gitMenu->addAction("Pull"),
-             gitMenu->addAction("Push"),
-             gitMenu->addAction("Commit..."),
-         })
-        a->setEnabled(false);
+
+    auto *actRefresh = gitMenu->addAction("Refresh Status", this, [this]() {
+        if (gitPanel_) {
+            gitPanel_->refresh();
+            bottomTabs->setCurrentWidget(gitPane);
+            bottomDock->setVisible(true);
+        }
+    });
+    actRefresh->setShortcut(QKeySequence("Ctrl+Shift+G"));
+
+    gitMenu->addAction("Stage All", this, [this]() {
+        if (gitPanel_) {
+            gitPanel_->stageAll();
+            bottomTabs->setCurrentWidget(gitPane);
+            bottomDock->setVisible(true);
+        }
+    });
+
+    gitMenu->addAction("Unstage All", this, [this]() {
+        if (gitPanel_) {
+            gitPanel_->unstageAll();
+            bottomTabs->setCurrentWidget(gitPane);
+            bottomDock->setVisible(true);
+        }
+    });
+
     gitMenu->addSeparator();
-    for (auto *a : {
-             gitMenu->addAction("Branches"),
-             gitMenu->addAction("Diff"),
-         })
-        a->setEnabled(false);
+
+    auto *actCommit = gitMenu->addAction("Commit...", this, [this]() {
+        if (gitPanel_) {
+            bottomTabs->setCurrentWidget(gitPane);
+            bottomDock->setVisible(true);
+            gitPanel_->focusCommitMessage();
+        }
+    });
+    actCommit->setShortcut(QKeySequence("Ctrl+K"));
+
+    gitMenu->addSeparator();
+
+    gitMenu->addAction("Pull", this, [this]() {
+        if (gitPanel_) {
+            gitPanel_->pull();
+            bottomTabs->setCurrentWidget(outputPane);
+            bottomDock->setVisible(true);
+        }
+    });
+
+    gitMenu->addAction("Push", this, [this]() {
+        if (gitPanel_) {
+            gitPanel_->push();
+            bottomTabs->setCurrentWidget(outputPane);
+            bottomDock->setVisible(true);
+        }
+    });
+
+    gitMenu->addSeparator();
+
+    gitMenu->addAction("History...", this, [this]() {
+        if (gitPanel_)
+            gitPanel_->showHistory();
+    });
 
     QMenu *teamMenu = menuBar()->addMenu("&Team");
     teamMenu->addAction("Connect to Server", this, &MainWindow::joinCollab);
@@ -370,6 +431,11 @@ void MainWindow::startCollab(const QString &room,
             &CollabSession::remoteFileFocusChanged,
             this,
             &MainWindow::onRemoteFileFocusChanged);
+    connect(session, &CollabSession::sessionReportReady, this, &MainWindow::onSessionReportReady);
+    connect(session,
+            &CollabSession::sessionAiInsightsReady,
+            this,
+            &MainWindow::onSessionAiInsightsReady);
     connect(session, &CollabSession::errorOccurred, this, [this](const QString &err) {
         outputPane->appendPlainText("[Collab] Error: " + err);
     });
@@ -437,6 +503,11 @@ void MainWindow::joinCollab()
             &CollabSession::remoteFileFocusChanged,
             this,
             &MainWindow::onRemoteFileFocusChanged);
+    connect(session, &CollabSession::sessionReportReady, this, &MainWindow::onSessionReportReady);
+    connect(session,
+            &CollabSession::sessionAiInsightsReady,
+            this,
+            &MainWindow::onSessionAiInsightsReady);
     connect(session, &CollabSession::errorOccurred, this, [this](const QString &err) {
         outputPane->appendPlainText("[Collab] Error: " + err);
     });
@@ -526,6 +597,7 @@ QString MainWindow::toSessionKey(const QString &editorPath) const
 
 void MainWindow::stopAllCollab()
 {
+    pendingEndCollab = false;
     if (!session)
         return;
 
@@ -819,9 +891,17 @@ void MainWindow::setupLeftPanel()
             &MainWindow::onCollabUserContextMenu);
     inVl->addWidget(collabUsersList, 1);
 
+    btnSessionReport = new QPushButton("Session Report");
+    btnSessionReport->setObjectName("voipBtn");
+    connect(btnSessionReport, &QPushButton::clicked, this, [this]() {
+        if (session)
+            session->requestSessionReport();
+    });
+    inVl->addWidget(btnSessionReport);
+
     btnStopAllCollab = new QPushButton("End Collab");
     btnStopAllCollab->setObjectName("voipBtn");
-    connect(btnStopAllCollab, &QPushButton::clicked, this, &MainWindow::stopAllCollab);
+    connect(btnStopAllCollab, &QPushButton::clicked, this, &MainWindow::onEndCollabRequested);
     inVl->addWidget(btnStopAllCollab);
 
     collabInSessionPane->hide();
@@ -933,17 +1013,11 @@ void MainWindow::setupBottomDock()
     terminal->setObjectName("terminal");
     bottomTabs->addTab(terminal, "Terminal");
 
-    gitPane = new QWidget;
-    gitPane->setObjectName("gitPane");
-    {
-        auto *l = new QVBoxLayout(gitPane);
-        auto *lbl = new QLabel("Git integration\n\n"
-                               "Planned: staged / unstaged changes, commit history, inline diff.");
-        lbl->setAlignment(Qt::AlignCenter);
-        lbl->setWordWrap(true);
-        lbl->setObjectName("stubLabel");
-        l->addWidget(lbl);
-    }
+    gitPanel_ = new GitPanel(this);
+    gitPane = gitPanel_;
+    connect(gitPanel_, &GitPanel::logMessage, this, [this](const QString &msg) {
+        outputPane->appendPlainText(msg);
+    });
     bottomTabs->addTab(gitPane, "Git");
 
     setupDebugPanel();
@@ -1840,6 +1914,9 @@ void MainWindow::openFolder()
     outputPane->appendPlainText("[TeamHub] Opened folder: " + path);
 
     terminal->setWorkingDirectory(path);
+
+    if (gitPanel_)
+        gitPanel_->setRepoPath(path);
 }
 
 bool MainWindow::saveFile()
@@ -2327,4 +2404,48 @@ void MainWindow::onCollabUserContextMenu(const QPoint &pos)
     }
 
     menu.exec(collabUsersList->viewport()->mapToGlobal(pos));
+}
+
+void MainWindow::onEndCollabRequested()
+{
+    if (!session) {
+        stopAllCollab();
+        return;
+    }
+    pendingEndCollab = true;
+    session->endSession();
+    QTimer::singleShot(3000, this, [this]() {
+        if (pendingEndCollab && (!reportDialog || !reportDialog->isVisible()))
+            stopAllCollab();
+    });
+}
+
+void MainWindow::onSessionReportReady(const SessionReportData &report)
+{
+    if (reportDialog) {
+        reportDialog->close();
+        reportDialog->deleteLater();
+        reportDialog = nullptr;
+    }
+
+    reportDialog = new SessionReportDialog(report, pendingEndCollab, this);
+
+    if (pendingEndCollab) {
+        connect(reportDialog, &SessionReportDialog::sessionEnded, this, &MainWindow::stopAllCollab);
+        connect(reportDialog, &QDialog::rejected, this, &MainWindow::stopAllCollab);
+    }
+
+    connect(reportDialog, &QDialog::finished, this, [this]() {
+        pendingEndCollab = false;
+        reportDialog = nullptr;
+    });
+
+    reportDialog->show();
+    outputPane->appendPlainText("[Collab] Session report received.");
+}
+
+void MainWindow::onSessionAiInsightsReady(const AiInsights &ai)
+{
+    if (reportDialog)
+        reportDialog->updateAiSection(ai);
 }

@@ -19,9 +19,12 @@
 #include <QWidgetAction>
 
 #include "collab/collabsession.h"
+#include "collab/sessionreport.h"
+#include "collab/sessionreportdialog.h"
 #include "debug/debugadapter.h"
 #include "editor/codeeditor.h"
 #include "filebrowser/filebrowser.h"
+#include "git/gitpanel.h"
 #include "terminal/terminal.h"
 #include "voicechat/voicechat.h"
 
@@ -66,6 +69,7 @@ private:
     QPlainTextEdit *terminalPane;
     Terminal *terminal;
     QWidget *gitPane;
+    GitPanel *gitPanel_ = nullptr;
     QWidget *debugPane;
     QDockWidget *voipDock;
 
@@ -86,11 +90,16 @@ private:
     QPushButton *btnStopAllCollab = nullptr;
     QPushButton *btnStartCollab = nullptr;
     QPushButton *btnJoinCollab = nullptr;
+    QPushButton *btnSessionReport = nullptr;
     QWidget *collabNoSessionPane = nullptr;
     QWidget *collabInSessionPane = nullptr;
     QMap<int, QString> peerFiles;
     QList<int> peerSiteIds;
     QString currentCollabFile;
+
+    // Session report
+    SessionReportDialog *reportDialog = nullptr;
+    bool pendingEndCollab = false;
 
     // Debug
     DebugAdapter *debugAdapter = nullptr;
@@ -104,7 +113,7 @@ private:
     QAction *actDebugMain = nullptr;
 
     // Voice
-    VoiceChat *voiceChat;
+    VoiceChat *voiceChat = nullptr;
     QLabel *voipStatusLabel;
     QPushButton *voipCallBtn;
     QTreeWidget *voipTree;
@@ -191,6 +200,9 @@ private slots:
     void onVoipPeersUpdated(const QStringList &ids);
 
     void onCollabUserContextMenu(const QPoint &pos);
+    void onSessionReportReady(const SessionReportData &report);
+    void onSessionAiInsightsReady(const AiInsights &ai);
+    void onEndCollabRequested();
 
     void onDebugStopped(const QString &filePath, int line, const QString &reason);
     void onDebugContinued();

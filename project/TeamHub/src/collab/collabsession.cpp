@@ -288,6 +288,16 @@ void CollabSession::handleMessage(const QJsonObject &obj)
         return;
     }
 
+    if (type == "session_report") {
+        emit sessionReportReady(parseSessionReport(obj["data"].toObject()));
+        return;
+    }
+
+    if (type == "session_report_ai") {
+        emit sessionAiInsightsReady(parseAiInsights(obj["data"].toObject()));
+        return;
+    }
+
     if (type == "project_init") {
         QStringList files;
         for (const QJsonValue &v : obj["files"].toArray())
@@ -425,6 +435,66 @@ void CollabSession::kickUser(int siteId)
     msg["type"] = "kick";
     msg["siteId"] = siteId;
     sendMessage(msg);
+}
+
+void CollabSession::requestSessionReport()
+{
+    QJsonObject msg;
+    msg["type"] = "session_report_request";
+    sendMessage(msg);
+}
+
+void CollabSession::endSession()
+{
+    QJsonObject msg;
+    msg["type"] = "end_session";
+    sendMessage(msg);
+}
+
+SessionReportData CollabSession::parseSessionReport(const QJsonObject &data)
+{
+    SessionReportData r;
+    r.roomName = data["room"].toString();
+    r.startTime = data["start_time"].toString();
+    r.endTime = data["end_time"].toString();
+    r.durationSec = data["duration_sec"].toInt();
+
+    for (const QJsonValue &pv : data["participants"].toArray()) {
+        const QJsonObject po = pv.toObject();
+        ParticipantStats p;
+        p.siteId = po["site_id"].toInt();
+        p.isHost = po["is_host"].toBool();
+        p.activeSec = po["active_sec"].toInt();
+        p.totalInserts = po["total_inserts"].toInt();
+        p.totalDeletes = po["total_deletes"].toInt();
+        for (const QJsonValue &fv : po["files_touched"].toArray())
+            p.filesTouched.append(fv.toString());
+        r.participants.append(p);
+    }
+
+    for (const QJsonValue &fv : data["files"].toArray()) {
+        const QJsonObject fo = fv.toObject();
+        FileInfo fi;
+        fi.name = fo["name"].toString();
+        for (const QJsonValue &ev : fo["editors"].toArray())
+            fi.editorSiteIds.append(ev.toInt());
+        r.files.append(fi);
+    }
+
+    return r;
+}
+
+AiInsights CollabSession::parseAiInsights(const QJsonObject &data)
+{
+    AiInsights ai;
+    ai.available = true;
+    ai.summary = data["summary"].toString();
+
+    const QJsonObject work = data["participant_work"].toObject();
+    for (auto it = work.begin(); it != work.end(); ++it)
+        ai.participantWork[it.key().toInt()] = it.value().toString();
+
+    return ai;
 }
 
 void CollabSession::sendRegister()

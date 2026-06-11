@@ -122,7 +122,7 @@ private:
     bool handleBackspaceInPair(QKeyEvent *event);
 
     void deleteSelection();
-    void shiftRemoteCursors(int fromBytePos, int byteDelta);
+    void shiftRemoteCursors(int fromBytePos, int byteDelta, bool repaint = true);
 
     void checkSyntax();
     void onLintFinished(int exitCode, QProcess::ExitStatus);

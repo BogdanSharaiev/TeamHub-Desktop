@@ -268,15 +268,19 @@ void CodeEditor::keyPressEvent(QKeyEvent *event)
                 QChar sendChar = (ch == '\r') ? QChar('\n') : ch;
                 QsciScintilla::keyPressEvent(event);
                 emit localInsert(pos, sendChar);
-                shiftRemoteCursors(pos, QString(sendChar).toUtf8().size());
 
                 if (sendChar == '\n') {
                     int newPos = SendScintilla(SCI_GETCURRENTPOS);
                     int indentLen = newPos - (pos + 1);
+                    shiftRemoteCursors(pos, 1, /*repaint=*/false);
                     for (int i = 0; i < indentLen; i++) {
                         emit localInsert(pos + 1 + i, QChar(' '));
-                        shiftRemoteCursors(pos + 1 + i, 1);
+                        shiftRemoteCursors(pos + 1 + i, 1, /*repaint=*/false);
                     }
+                    if (cursorOverlay)
+                        cursorOverlay->update();
+                } else {
+                    shiftRemoteCursors(pos, QString(sendChar).toUtf8().size());
                 }
                 return;
             }
@@ -801,16 +805,39 @@ void CodeEditor::applyRemoteText(const QString &newText)
 {
     applyingRemote = true;
     blockSignals(true);
-    int curLine = 0, curCol = 0;
-    getCursorPosition(&curLine, &curCol);
+
     const int firstVisLine = (int) SendScintilla(SCI_GETFIRSTVISIBLELINE);
+
+    const int oldBytePos = (int) SendScintilla(SCI_GETCURRENTPOS);
+
+    const QByteArray oldBytes = text().toUtf8();
+    const QByteArray newBytes = newText.toUtf8();
+    const int oldLen = oldBytes.size();
+    const int newLen = newBytes.size();
+
+    int changeAt = qMin(oldLen, newLen);
+    for (int i = 0, n = changeAt; i < n; ++i) {
+        if ((unsigned char) oldBytes.at(i) != (unsigned char) newBytes.at(i)) {
+            changeAt = i;
+            break;
+        }
+    }
+
+    const int byteDelta = newLen - oldLen;
+    int newBytePos;
+    if (oldBytePos <= changeAt) {
+        newBytePos = oldBytePos;
+    } else if (byteDelta >= 0) {
+        newBytePos = oldBytePos + byteDelta;
+    } else {
+        newBytePos = qMax(changeAt, oldBytePos + byteDelta);
+    }
+    newBytePos = qBound(0, newBytePos, newLen);
 
     setText(newText);
 
-    const int totalLines = lines();
-    if (curLine >= totalLines)
-        curLine = qMax(0, totalLines - 1);
-    setCursorPosition(curLine, curCol);
+    SendScintilla(SCI_SETCURRENTPOS, (ulong) newBytePos);
+    SendScintilla(SCI_SETANCHOR, (ulong) newBytePos);
 
     SendScintilla(SCI_SETFIRSTVISIBLELINE, (ulong) firstVisLine);
 
@@ -982,7 +1009,7 @@ void CodeEditor::deleteSelection()
     shiftRemoteCursors(selStart, -(selEnd - selStart));
 }
 
-void CodeEditor::shiftRemoteCursors(int fromBytePos, int byteDelta)
+void CodeEditor::shiftRemoteCursors(int fromBytePos, int byteDelta, bool repaint)
 {
     if (remoteCursorPositions.isEmpty())
         return;
@@ -1000,7 +1027,7 @@ void CodeEditor::shiftRemoteCursors(int fromBytePos, int byteDelta)
             }
         }
     }
-    if (changed && cursorOverlay)
+    if (changed && repaint && cursorOverlay)
         cursorOverlay->update();
 }
 
@@ -1053,10 +1080,12 @@ void CodeEditor::paintRemoteCursors(QWidget *overlay)
     painter.setFont(labelFont);
     QFontMetrics fm(labelFont);
 
+    const int docLen = (int) SendScintilla(SCI_GETLENGTH);
+
     for (auto it = remoteCursorPositions.constBegin(); it != remoteCursorPositions.constEnd();
          ++it) {
         const int siteId = it.key();
-        const int sciPos = it.value();
+        const int sciPos = qBound(0, it.value(), docLen);
         const QColor color = kCursorColors[std::abs(siteId) % 4];
 
         const int x = (int) SendScintilla(SCI_POINTXFROMPOSITION, 0UL, (long) sciPos);
