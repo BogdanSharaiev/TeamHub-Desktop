@@ -26,6 +26,9 @@ public:
     static constexpr int MARKER_BREAKPOINT = 0;
     static constexpr int MARKER_DEBUG_LINE = 1;
     static constexpr int MARKER_DEBUG_BG = 2;
+    static constexpr int MARKER_DIFF_ADDED = 3;
+    static constexpr int MARKER_DIFF_REMOVED = 4;
+    static constexpr int INDIC_DIFF_CHARS = 8;
 
     explicit CodeEditor(QWidget *parent = nullptr);
 
@@ -47,6 +50,9 @@ public:
     void toggleBreakpoint(int line);
     void setDebugLine(int line);
     void clearDebugLine();
+    void applyDiffMarkers(const QList<int> &added, const QList<int> &removedAt);
+    void applyCharRangeMarker(int line, int colStart, int colEnd);
+    void clearDiffMarkers();
     const QSet<int> &breakpoints() const { return breakpointSet; }
 
     bool applyingRemote = false;

@@ -5,7 +5,6 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
-#include <QTextEdit>
 #include <QTreeWidget>
 #include <QWidget>
 
@@ -25,12 +24,12 @@ public:
     void unstageAll();
     void pull();
     void push();
-    void showHistory();
     void focusCommitMessage();
     void initRepo(const QString &path);
 
 signals:
     void logMessage(const QString &msg);
+    void diffRequested(const QString &relPath, bool staged);
 
 private slots:
     void onFileClicked(QTreeWidgetItem *item, int col);
@@ -45,34 +44,28 @@ private:
     QString repoPath;
     bool updatingBranches = false;
 
-    // Top bar
     QComboBox *branchCombo;
     QPushButton *btnRefresh;
     QPushButton *btnPull;
     QPushButton *btnPush;
-    QPushButton *btnHistory;
 
-    // File tree
     QTreeWidget *fileTree;
     QTreeWidgetItem *stagedHeader;
     QTreeWidgetItem *unstagedHeader;
 
-    // Diff
-    QTextEdit *diffView;
-
-    // Bottom bar
     QPushButton *btnStageAll;
     QPushButton *btnUnstageAll;
     QLineEdit *commitMsg;
     QPushButton *btnCommit;
+
+    QTreeWidget *logTree;
 
     QWidget *noRepoPane;
     QWidget *repoPane;
 
     void setupUi();
     void populateTree(const QList<GitManager::FileStatus> &statusList);
-    void showDiff(const QString &path, bool staged);
-    static void applyDiff(QTextEdit *view, const QString &raw);
+    void refreshLog();
     static QString stateLabel(GitManager::FileStatus::State state);
     void runGitProcess(const QString &op, const QStringList &args);
     void setRepoAvailable(bool on);

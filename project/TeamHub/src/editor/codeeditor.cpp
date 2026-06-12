@@ -132,6 +132,18 @@ void CodeEditor::setupMargins()
 
     markerDefine(QsciScintilla::Background, MARKER_DEBUG_BG);
     setMarkerBackgroundColor(QColor("#2d2800"), MARKER_DEBUG_BG);
+
+    markerDefine(QsciScintilla::Background, MARKER_DIFF_ADDED);
+    setMarkerBackgroundColor(QColor("#1a4d1a"), MARKER_DIFF_ADDED);
+
+    markerDefine(QsciScintilla::Background, MARKER_DIFF_REMOVED);
+    setMarkerBackgroundColor(QColor("#4d1a1a"), MARKER_DIFF_REMOVED);
+
+    indicatorDefine(QsciScintilla::FullBoxIndicator, INDIC_DIFF_CHARS);
+    setIndicatorForegroundColor(QColor("#57e37a"), INDIC_DIFF_CHARS);
+    setIndicatorDrawUnder(true, INDIC_DIFF_CHARS);
+    SendScintilla(SCI_INDICSETALPHA, (unsigned long) INDIC_DIFF_CHARS, (long) 80);
+    SendScintilla(SCI_INDICSETOUTLINEALPHA, (unsigned long) INDIC_DIFF_CHARS, (long) 200);
 }
 
 void CodeEditor::setupEditor()
@@ -1148,4 +1160,35 @@ void CodeEditor::clearDebugLine()
         markerDelete(debugLine, MARKER_DEBUG_BG);
         debugLine = -1;
     }
+}
+
+void CodeEditor::applyDiffMarkers(const QList<int> &added, const QList<int> &removedAt)
+{
+    markerDeleteAll(MARKER_DIFF_ADDED);
+    markerDeleteAll(MARKER_DIFF_REMOVED);
+
+    for (int line : added)
+        markerAdd(line - 1, MARKER_DIFF_ADDED);
+
+    const int lastLine = qMax(0, lines() - 1);
+    for (int line : removedAt) {
+        const int markerLine = qMin(line - 1, lastLine);
+        if (markerLine >= 0)
+            markerAdd(markerLine, MARKER_DIFF_REMOVED);
+    }
+}
+
+void CodeEditor::applyCharRangeMarker(int line, int colStart, int colEnd)
+{
+    if (line < 1 || colStart >= colEnd)
+        return;
+    fillIndicatorRange(line - 1, colStart, line - 1, colEnd, INDIC_DIFF_CHARS);
+}
+
+void CodeEditor::clearDiffMarkers()
+{
+    markerDeleteAll(MARKER_DIFF_ADDED);
+    markerDeleteAll(MARKER_DIFF_REMOVED);
+    SendScintilla(SCI_SETINDICATORCURRENT, (unsigned long) INDIC_DIFF_CHARS);
+    SendScintilla(SCI_INDICATORCLEARRANGE, 0UL, (long) length());
 }

@@ -1,14 +1,13 @@
 #include "gitpanel.h"
-#include "gitlogdialog.h"
 
 #include <QFrame>
 #include <QHBoxLayout>
+#include <QHeaderView>
 #include <QInputDialog>
 #include <QMenu>
 #include <QMessageBox>
 #include <QProcess>
 #include <QSplitter>
-#include <QTextCursor>
 #include <QVBoxLayout>
 
 static const char *NEW_BRANCH_ITEM = "__new__";
@@ -65,42 +64,50 @@ void GitPanel::setupUi()
     topH->setContentsMargins(6, 4, 6, 4);
     topH->setSpacing(4);
 
-    topH->addWidget(new QLabel("Branch:"));
     branchCombo = new QComboBox;
     branchCombo->setMinimumWidth(110);
-    branchCombo->setMaximumWidth(180);
+    branchCombo->setMaximumWidth(200);
     topH->addWidget(branchCombo);
 
-    btnRefresh = new QPushButton("↻");
+    btnRefresh = new QPushButton("Refresh");
     btnRefresh->setToolTip("Refresh status  (Ctrl+Shift+G)");
-    btnRefresh->setFixedSize(26, 26);
+    btnRefresh->setFixedHeight(26);
     btnRefresh->setObjectName("voipBtn");
+    topH->addWidget(btnRefresh);
+
+    topH->addStretch();
 
     btnPull = new QPushButton("Pull");
     btnPush = new QPushButton("Push");
-    btnHistory = new QPushButton("History");
-    for (auto *b : {btnPull, btnPush, btnHistory})
+    for (auto *b : {btnPull, btnPush})
         b->setObjectName("voipBtn");
-
-    topH->addWidget(btnRefresh);
-    topH->addStretch();
     topH->addWidget(btnPull);
     topH->addWidget(btnPush);
-    topH->addWidget(btnHistory);
 
     repoVl->addWidget(topBar);
 
-    auto *sep = new QFrame;
-    sep->setFrameShape(QFrame::HLine);
-    sep->setObjectName("panelSeparator");
-    repoVl->addWidget(sep);
+    auto *topSep = new QFrame;
+    topSep->setFrameShape(QFrame::HLine);
+    topSep->setObjectName("panelSeparator");
+    repoVl->addWidget(topSep);
 
     auto *splitter = new QSplitter(Qt::Horizontal);
+    splitter->setHandleWidth(1);
+    splitter->setObjectName("gitSplitter");
 
-    auto *leftW = new QWidget;
-    auto *leftVl = new QVBoxLayout(leftW);
+    auto *leftWidget = new QWidget;
+    auto *leftVl = new QVBoxLayout(leftWidget);
     leftVl->setContentsMargins(0, 0, 0, 0);
     leftVl->setSpacing(0);
+
+    auto *changesLabel = new QLabel("  LOCAL CHANGES");
+    changesLabel->setObjectName("gitSectionHeader");
+    QFont sectionFont;
+    sectionFont.setBold(true);
+    sectionFont.setPointSize(sectionFont.pointSize() - 1);
+    changesLabel->setFont(sectionFont);
+    changesLabel->setFixedHeight(22);
+    leftVl->addWidget(changesLabel);
 
     fileTree = new QTreeWidget;
     fileTree->setHeaderHidden(true);
@@ -108,7 +115,6 @@ void GitPanel::setupUi()
     fileTree->setContextMenuPolicy(Qt::CustomContextMenu);
     fileTree->setRootIsDecorated(true);
     fileTree->setIndentation(14);
-    fileTree->setMinimumWidth(180);
     leftVl->addWidget(fileTree, 1);
 
     QFont hf;
@@ -125,6 +131,11 @@ void GitPanel::setupUi()
     unstagedHeader->setForeground(0, QColor("#c97070"));
     unstagedHeader->setExpanded(true);
 
+    auto *commitSep = new QFrame;
+    commitSep->setFrameShape(QFrame::HLine);
+    commitSep->setObjectName("panelSeparator");
+    leftVl->addWidget(commitSep);
+
     auto *stageRow = new QHBoxLayout;
     stageRow->setContentsMargins(4, 4, 4, 2);
     stageRow->setSpacing(4);
@@ -138,10 +149,10 @@ void GitPanel::setupUi()
     leftVl->addLayout(stageRow);
 
     auto *commitRow = new QHBoxLayout;
-    commitRow->setContentsMargins(4, 2, 4, 4);
+    commitRow->setContentsMargins(4, 2, 4, 6);
     commitRow->setSpacing(4);
     commitMsg = new QLineEdit;
-    commitMsg->setPlaceholderText("Commit message...");
+    commitMsg->setPlaceholderText("Commit message…");
     btnCommit = new QPushButton("Commit");
     btnCommit->setObjectName("voipBtn");
     btnCommit->setEnabled(false);
@@ -149,18 +160,38 @@ void GitPanel::setupUi()
     commitRow->addWidget(btnCommit);
     leftVl->addLayout(commitRow);
 
-    splitter->addWidget(leftW);
+    splitter->addWidget(leftWidget);
 
-    diffView = new QTextEdit;
-    diffView->setReadOnly(true);
-    diffView->setObjectName("outputPane");
-    diffView->setPlaceholderText("Click a file to view its diff...");
-    diffView->setMinimumWidth(200);
-    splitter->addWidget(diffView);
+    auto *rightWidget = new QWidget;
+    auto *rightVl = new QVBoxLayout(rightWidget);
+    rightVl->setContentsMargins(0, 0, 0, 0);
+    rightVl->setSpacing(0);
 
-    splitter->setStretchFactor(0, 1);
-    splitter->setStretchFactor(1, 2);
-    splitter->setSizes({230, 500});
+    auto *logLabel = new QLabel("  LOG");
+    logLabel->setObjectName("gitSectionHeader");
+    logLabel->setFont(sectionFont);
+    logLabel->setFixedHeight(22);
+    rightVl->addWidget(logLabel);
+
+    logTree = new QTreeWidget;
+    logTree->setObjectName("gitLogTree");
+    logTree->setColumnCount(4);
+    logTree->setHeaderLabels({"Message", "Author", "Date", "Hash"});
+    logTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    logTree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    logTree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    logTree->header()->setSectionResizeMode(3, QHeaderView::Fixed);
+    logTree->header()->resizeSection(3, 64);
+    logTree->setRootIsDecorated(false);
+    logTree->setAlternatingRowColors(true);
+    logTree->setSelectionMode(QAbstractItemView::SingleSelection);
+    logTree->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    logTree->setIndentation(0);
+    logTree->setUniformRowHeights(true);
+    rightVl->addWidget(logTree, 1);
+
+    splitter->addWidget(rightWidget);
+    splitter->setSizes({220, 460});
 
     repoVl->addWidget(splitter, 1);
     root->addWidget(repoPane);
@@ -178,7 +209,6 @@ void GitPanel::setupUi()
     connect(btnRefresh, &QPushButton::clicked, this, &GitPanel::refresh);
     connect(btnPull, &QPushButton::clicked, this, &GitPanel::pull);
     connect(btnPush, &QPushButton::clicked, this, &GitPanel::push);
-    connect(btnHistory, &QPushButton::clicked, this, &GitPanel::showHistory);
     connect(btnStageAll, &QPushButton::clicked, this, [this]() { git->stageAll(); });
     connect(btnUnstageAll, &QPushButton::clicked, this, [this]() { git->unstageAll(); });
     connect(btnCommit, &QPushButton::clicked, this, &GitPanel::onCommitClicked);
@@ -226,15 +256,36 @@ void GitPanel::refresh()
     const QString current = git->currentBranch();
     for (const QString &b : git->localBranches())
         branchCombo->addItem(b);
-    branchCombo->addItem("+ New Branch...", NEW_BRANCH_ITEM);
+    branchCombo->addItem("New Branch…", NEW_BRANCH_ITEM);
     branchCombo->setCurrentText(current);
     updatingBranches = false;
 
-    const auto statusList = git->status();
-    populateTree(statusList);
+    populateTree(git->status());
 
     const int staged = git->stagedCount();
     btnCommit->setEnabled(staged > 0 && !commitMsg->text().trimmed().isEmpty());
+
+    refreshLog();
+}
+
+void GitPanel::refreshLog()
+{
+    logTree->clear();
+    const auto commits = git->log(200);
+    for (const auto &c : commits) {
+        auto *item = new QTreeWidgetItem();
+        item->setText(0, "● " + c.message);
+        item->setText(1, c.author);
+        item->setText(2, c.date);
+        item->setText(3, c.shortHash);
+        item->setForeground(0, QColor("#cccccc"));
+        item->setForeground(1, QColor("#9cdcfe"));
+        item->setForeground(2, QColor("#858585"));
+        item->setForeground(3, QColor("#569cd6"));
+        item->setData(0, Qt::UserRole, c.fullHash);
+        item->setToolTip(0, c.message);
+        logTree->addTopLevelItem(item);
+    }
 }
 
 void GitPanel::stageAll()
@@ -290,7 +341,8 @@ void GitPanel::onFileClicked(QTreeWidgetItem *item, int)
 {
     if (!item || !item->parent())
         return;
-    showDiff(item->data(0, Qt::UserRole).toString(), item->data(0, Qt::UserRole + 1).toBool());
+    emit diffRequested(item->data(0, Qt::UserRole).toString(),
+                       item->data(0, Qt::UserRole + 1).toBool());
 }
 
 void GitPanel::onFileDoubleClicked(QTreeWidgetItem *item, int)
@@ -298,7 +350,8 @@ void GitPanel::onFileDoubleClicked(QTreeWidgetItem *item, int)
     if (!item || !item->parent())
         return;
     const QString path = item->data(0, Qt::UserRole).toString();
-    if (item->data(0, Qt::UserRole + 1).toBool())
+    const bool staged = item->data(0, Qt::UserRole + 1).toBool();
+    if (staged)
         git->unstageFile(path);
     else
         git->stageFile(path);
@@ -332,67 +385,9 @@ void GitPanel::onContextMenu(const QPoint &pos)
         });
     }
     menu.addSeparator();
-    menu.addAction("Show Diff", this, [this, path, staged]() { showDiff(path, staged); });
+    menu.addAction("Show Diff", this, [this, path, staged]() { emit diffRequested(path, staged); });
 
     menu.exec(fileTree->viewport()->mapToGlobal(pos));
-}
-
-void GitPanel::showDiff(const QString &path, bool staged)
-{
-    const QString raw = staged ? git->diffStaged(path) : git->diffUnstaged(path);
-    applyDiff(diffView, raw);
-}
-
-void GitPanel::applyDiff(QTextEdit *view, const QString &raw)
-{
-    view->clear();
-
-    QFont mono("Consolas", 10);
-    mono.setStyleHint(QFont::Monospace);
-    view->setFont(mono);
-
-    if (raw.isEmpty()) {
-        view->setPlainText("No diff available.");
-        return;
-    }
-
-    QTextCursor cur = view->textCursor();
-    cur.movePosition(QTextCursor::Start);
-
-    QTextBlockFormat defaultBlock;
-    defaultBlock.setBackground(QColor("#1e1e1e"));
-
-    const QStringList lines = raw.split('\n');
-    for (int i = 0; i < lines.size(); ++i) {
-        const QString &line = lines[i];
-
-        if (i > 0)
-            cur.insertBlock(defaultBlock);
-
-        QTextBlockFormat blockFmt = defaultBlock;
-        QTextCharFormat charFmt;
-        charFmt.setFont(mono);
-
-        if (line.startsWith('+') && !line.startsWith("+++")) {
-            blockFmt.setBackground(QColor("#0d2b0d"));
-            charFmt.setForeground(QColor("#6db96d"));
-        } else if (line.startsWith('-') && !line.startsWith("---")) {
-            blockFmt.setBackground(QColor("#2b0d0d"));
-            charFmt.setForeground(QColor("#c97070"));
-        } else if (line.startsWith("@@")) {
-            charFmt.setForeground(QColor("#569cd6"));
-        } else if (line.startsWith("diff ") || line.startsWith("index ") || line.startsWith("---")
-                   || line.startsWith("+++")) {
-            charFmt.setForeground(QColor("#808080"));
-        } else {
-            charFmt.setForeground(QColor("#cccccc"));
-        }
-
-        cur.setBlockFormat(blockFmt);
-        cur.insertText(line, charFmt);
-    }
-
-    view->moveCursor(QTextCursor::Start);
 }
 
 void GitPanel::onCommitClicked()
@@ -406,7 +401,6 @@ void GitPanel::onCommitClicked()
         return;
     }
     commitMsg->clear();
-    diffView->clear();
     emit logMessage("[Git] Committed: " + msg);
     refresh();
 }
@@ -462,11 +456,10 @@ void GitPanel::onNewBranch()
         return;
     }
 
-    if (!git->createBranch(name, true)) {
+    if (!git->createBranch(name, true))
         QMessageBox::warning(this, "Create Branch Failed", git->lastError());
-    } else {
+    else
         emit logMessage("[Git] Created and switched to branch: " + name);
-    }
     refresh();
 }
 
@@ -501,19 +494,9 @@ void GitPanel::pull()
 {
     runGitProcess("pull", {"pull"});
 }
-
 void GitPanel::push()
 {
     runGitProcess("push", {"push"});
-}
-
-void GitPanel::showHistory()
-{
-    if (!git->isValid())
-        return;
-    auto *dlg = new GitLogDialog(git, this);
-    dlg->setAttribute(Qt::WA_DeleteOnClose);
-    dlg->show();
 }
 
 QString GitPanel::stateLabel(GitManager::FileStatus::State state)

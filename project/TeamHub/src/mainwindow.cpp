@@ -300,13 +300,6 @@ void MainWindow::setupMenuBar()
         }
     });
 
-    gitMenu->addSeparator();
-
-    gitMenu->addAction("History...", this, [this]() {
-        if (gitPanel_)
-            gitPanel_->showHistory();
-    });
-
     QMenu *teamMenu = menuBar()->addMenu("&Team");
     teamMenu->addAction("Connect to Server", this, &MainWindow::joinCollab);
     teamMenu->addSeparator();
@@ -1018,6 +1011,7 @@ void MainWindow::setupBottomDock()
     connect(gitPanel_, &GitPanel::logMessage, this, [this](const QString &msg) {
         outputPane->appendPlainText(msg);
     });
+    connect(gitPanel_, &GitPanel::diffRequested, this, &MainWindow::openDiffTab);
     bottomTabs->addTab(gitPane, "Git");
 
     setupDebugPanel();
@@ -1339,6 +1333,44 @@ void MainWindow::clearDebugHighlights()
         if (ed)
             ed->clearDebugLine();
     }
+}
+
+void MainWindow::openDiffTab(const QString &relPath, bool staged)
+{
+    if (!gitPanel_)
+        return;
+
+    const QString workdir = gitPanel_->manager()->workdir();
+    const QString absPath = QDir::cleanPath(workdir + relPath);
+    const QString tabName = QFileInfo(relPath).fileName() + " (diff)";
+
+    auto applyDiff = [&](CodeEditor *ed) {
+        ed->setReadOnly(false);
+        ed->loadFile(absPath);
+        ed->setReadOnly(true);
+        const auto stats = gitPanel_->manager()->diffLineStats(relPath, staged);
+        ed->applyDiffMarkers(stats.added, stats.removedAt);
+        for (const auto &r : stats.changedRanges)
+            ed->applyCharRangeMarker(r.line, r.colStart, r.colEnd);
+    };
+
+    for (int i = 0; i < editorTabs->count(); ++i) {
+        auto *ed = qobject_cast<CodeEditor *>(editorTabs->widget(i));
+        if (ed && ed->property("diffPath").toString() == absPath
+            && ed->property("diffStaged").toBool() == staged) {
+            applyDiff(ed);
+            editorTabs->setCurrentIndex(i);
+            return;
+        }
+    }
+
+    CodeEditor *ed = new CodeEditor(editorTabs);
+    ed->setProperty("diffPath", absPath);
+    ed->setProperty("diffStaged", staged);
+    applyDiff(ed);
+
+    const int idx = editorTabs->addTab(ed, tabName);
+    editorTabs->setCurrentIndex(idx);
 }
 
 void MainWindow::setupVoipDock()
@@ -1741,6 +1773,47 @@ QPushButton#searchReplaceBtn:pressed {
 QPushButton#searchReplaceBtn:disabled {
     background: #444444;
     color: #888888;
+}
+
+/* ── Git Panel ──────────────────────────────────────────────── */
+QWidget#gitTopBar {
+    background: #252526;
+}
+QLabel#gitSectionHeader {
+    background: #2d2d30;
+    color: #9d9d9d;
+    font-size: 10px;
+    padding-left: 4px;
+    letter-spacing: 1px;
+    border-bottom: 1px solid #3c3c3c;
+}
+QSplitter#gitSplitter::handle {
+    background: #3c3c3c;
+    width: 1px;
+}
+QTreeWidget#gitLogTree {
+    background: #252526;
+    color: #cccccc;
+    border: none;
+    outline: 0;
+    alternate-background-color: #2a2a2a;
+}
+QTreeWidget#gitLogTree::item {
+    height: 22px;
+    padding: 1px 2px;
+    border: none;
+}
+QTreeWidget#gitLogTree::item:hover    { background: #2a2d2e; }
+QTreeWidget#gitLogTree::item:selected { background: #094771; color: #ffffff; }
+QHeaderView#gitLogTree::section,
+QTreeWidget#gitLogTree QHeaderView::section {
+    background: #2d2d30;
+    color: #9d9d9d;
+    border: none;
+    border-right: 1px solid #3c3c3c;
+    border-bottom: 1px solid #3c3c3c;
+    padding: 3px 6px;
+    font-size: 11px;
 }
 
 /* ── Status Bar ─────────────────────────────────────────────── */

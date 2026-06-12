@@ -204,6 +204,7 @@ private slots:
     void onSessionAiInsightsReady(const AiInsights &ai);
     void onEndCollabRequested();
 
+    void openDiffTab(const QString &relPath, bool staged);
     void onDebugStopped(const QString &filePath, int line, const QString &reason);
     void onDebugContinued();
     void onDebugTerminated();

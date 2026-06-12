@@ -21,7 +21,6 @@ SOURCES += \
     src/editor/codeeditor.cpp \
     src/editor/textsearch.cpp \
     src/filebrowser/filebrowser.cpp \
-    src/git/gitlogdialog.cpp \
     src/git/gitmanager.cpp \
     src/git/gitpanel.cpp \
     src/main.cpp \
@@ -39,7 +38,6 @@ HEADERS += \
     src/editor/codeeditor.h \
     src/editor/textsearch.h \
     src/filebrowser/filebrowser.h \
-    src/git/gitlogdialog.h \
     src/git/gitmanager.h \
     src/git/gitpanel.h \
     src/mainwindow.h \

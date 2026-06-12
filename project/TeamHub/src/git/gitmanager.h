@@ -12,14 +12,16 @@ class GitManager : public QObject
 {
     Q_OBJECT
 public:
-    struct FileStatus {
+    struct FileStatus
+    {
         QString path;
         QString oldPath;
         enum class State { Modified, Added, Deleted, Untracked, Renamed } state;
         bool staged = false;
     };
 
-    struct CommitInfo {
+    struct CommitInfo
+    {
         QString shortHash;
         QString fullHash;
         QString message;
@@ -47,6 +49,18 @@ public:
     QString diffUnstaged(const QString &relPath = {});
     QString diffStaged(const QString &relPath = {});
 
+    struct DiffLineStats
+    {
+        struct CharRange
+        {
+            int line, colStart, colEnd;
+        };
+        QList<int> added;
+        QList<int> removedAt;
+        QList<CharRange> changedRanges;
+    };
+    DiffLineStats diffLineStats(const QString &relPath, bool staged);
+
     bool commit(const QString &message);
     int stagedCount();
 
@@ -71,6 +85,7 @@ private:
     void setError(const QString &ctx);
     bool hasHead() const;
     QString printDiff(git_diff *diff);
+    static DiffLineStats parseDiffStats(const QString &rawDiff);
 };
 
 #endif // GITMANAGER_H
