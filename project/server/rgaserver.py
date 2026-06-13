@@ -3,10 +3,10 @@ import datetime
 import json
 import os
 import time
-import urllib.error
-import urllib.request
 
 import websockets
+from google import genai
+from google.genai import errors as genai_errors
 
 HOST = "localhost"
 PORT = 8765
@@ -23,6 +23,10 @@ if os.path.exists(_env_path):
 
 GEMINI_API_KEY: str = _env.get("GEMINI_API_KEY", "")
 AI_ENABLED: bool = _env.get("AI_ENABLED", "true").lower() == "true"
+
+_genai_client: genai.Client | None = (
+    genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+)
 
 rooms: dict[str, set] = {}
 room_users: dict[str, dict] = {}
@@ -170,76 +174,86 @@ def build_report(room: str) -> dict:
     }
 
 
-def build_ai_prompt(report: dict) -> str:
-    parts_lines = []
-    for p in report["participants"]:
-        line = (f"  Site {p['site_id']}{'(Host)' if p['is_host'] else ''}: "
-                f"{p['total_inserts']} inserts, {p['total_deletes']} deletes, "
-                f"active {p['active_sec'] // 60}min")
-        if p["files_touched"]:
-            line += f", files: {', '.join(p['files_touched'])}"
-        parts_lines.append(line)
+def get_user_contributions(room: str) -> dict[int, dict[str, str]]:
+    MAX_CHARS = 800
+    result: dict[int, dict[str, str]] = {}
+    for fname, ops in file_history.get(room, {}).items():
+        for op in ops:
+            if op["type"] != "insert":
+                continue
+            sid = op["node"]["id"]["siteId"]
+            ch = op["node"].get("value", "")
+            result.setdefault(sid, {}).setdefault(fname, "")
+            if len(result[sid][fname]) < MAX_CHARS:
+                result[sid][fname] += ch
+    return result
 
-    files_str = ", ".join(f["name"] for f in report["files"]) or "none"
+
+def build_ai_prompt(report: dict, room: str) -> str:
     duration_min = report["duration_sec"] // 60
 
-    return (
-            "Analyze this collaborative coding session.\n\n"
-            f"Duration: {duration_min} min\n"
-            f"Files: {files_str}\n"
-            "Participants:\n" + "\n".join(parts_lines) + "\n\n"
-                                                         "Respond ONLY with valid JSON (no markdown) in this structure:\n"
-                                                         '{\n'
-                                                         '  "summary": "2-3 sentences in Ukrainian summarizing the session",\n'
-                                                         '  "participant_work": {\n'
-                                                         '    "<site_id_as_string>": "1-2 sentences in Ukrainian about what this person did"\n'
-                                                         '  }\n'
-                                                         '}'
+    contributions = get_user_contributions(room)
+    users_info = []
+    for p in report["participants"]:
+        sid = p["site_id"]
+        role = "host" if p["is_host"] else "guest"
+        lines = [f"User {sid} ({role}), {p['total_inserts']} inserts, {p['total_deletes']} deletes:"]
+        user_files = contributions.get(sid, {})
+        if user_files:
+            for fname, text in user_files.items():
+                snippet = text.strip()[:600]
+                if snippet:
+                    lines.append(f"  [{fname}]: {snippet}")
+        else:
+            lines.append("  (no recorded insertions)")
+        users_info.append("\n".join(lines))
+
+    file_sections = []
+    for fname, snap in file_snapshots.get(room, {}).items():
+        content = snap.get("text", "").strip()[:800]
+        if content:
+            file_sections.append(f"[{fname}]:\n{content}")
+
+    prompt = f"Спільна сесія програмування, тривалість: {duration_min} хв.\n\n"
+    if file_sections:
+        prompt += "=== Файли проекту ===\n" + "\n\n".join(file_sections) + "\n\n"
+    prompt += "=== Внески учасників ===\n" + "\n\n".join(users_info) + "\n\n"
+    prompt += (
+        "Проаналізуй сесію і напиши звіт українською мовою у такому форматі:\n\n"
+        "Спочатку — один абзац із загальним підсумком: що загалом було зроблено за сесію.\n\n"
+        "Потім — окремий абзац для КОЖНОГО учасника починаючи з 'User N:' де N — номер учасника. "
+        "У цьому абзаці детально поясни що конкретно зробив цей учасник: "
+        "які функції написав, які класи чи методи додав, що оптимізував або рефакторив, "
+        "які зміни вніс у логіку. Якщо видно назви функцій чи змінних — згадай їх. "
+        "Якщо учасник мало що вніс — так і напиши.\n\n"
+        "Відповідай тільки звичайним текстом без JSON, без markdown, без зірочок."
     )
+    return prompt
 
 
-def call_gemini(prompt: str, body: bytes) -> str | None:
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
-    )
-    req = urllib.request.Request(
-        url, data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    return data["candidates"][0]["content"]["parts"][0]["text"]
-
-
-async def generate_ai_insights(report: dict) -> dict | None:
-    if not AI_ENABLED or not GEMINI_API_KEY:
+async def generate_ai_insights(report: dict, room: str) -> str | None:
+    if not AI_ENABLED or _genai_client is None:
         return None
 
-    prompt = build_ai_prompt(report)
-    body = json.dumps({
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"responseMimeType": "application/json", "temperature": 0.3},
-    }, ensure_ascii=False).encode("utf-8")
-
-    loop = asyncio.get_event_loop()
+    prompt = build_ai_prompt(report, room)
     delays = [5, 15, 45]
     for attempt, delay in enumerate(delays + [None], start=1):
         try:
-            raw = await asyncio.wait_for(
-                loop.run_in_executor(None, call_gemini, prompt, body),
-                timeout=25.0,
+            response = await asyncio.wait_for(
+                _genai_client.aio.models.generate_content(
+                    model="gemini-flash-latest",
+                    contents=prompt,
+                    config=genai.types.GenerateContentConfig(temperature=0.4),
+                ),
+                timeout=90.0,
             )
-            return json.loads(raw) if raw else None
-        except urllib.error.HTTPError as e:
-            if e.code == 429:
-                try:
-                    reason = json.loads(e.read().decode()).get("error", {}).get("message", "")
-                except Exception:
-                    reason = ""
-                if "quota" in reason.lower() or "day" in reason.lower():
-                    print("[AI] Gemini daily quota exceeded — AI unavailable until tomorrow")
+            text = response.text
+            return text.strip() if text else None
+        except genai_errors.ClientError as e:
+            err_str = str(e)
+            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                if "quota" in err_str.lower() or "limit: 0" in err_str:
+                    print("[AI] Gemini quota exceeded — check billing/plan at ai.google.dev")
                     return None
                 if delay is not None:
                     print(f"[AI] Gemini 429 rate limit — retry {attempt}/{len(delays)} in {delay}s")
@@ -248,10 +262,10 @@ async def generate_ai_insights(report: dict) -> dict | None:
                     print("[AI] Gemini 429 — all retries exhausted")
                     return None
             else:
-                print(f"[AI] Gemini error: HTTP {e.code}")
+                print(f"[AI] Gemini error: {e}")
                 return None
         except asyncio.TimeoutError:
-            print("[AI] Gemini timeout (25s)")
+            print("[AI] Gemini timeout (90s)")
             return None
         except Exception as e:
             print(f"[AI] Gemini error: {e}")
@@ -264,9 +278,9 @@ async def handle_session_report(room: str):
     await broadcast_all(room, {"type": "session_report", "data": report})
 
     async def send_ai():
-        insights = await generate_ai_insights(report)
-        if insights:
-            await broadcast_all(room, {"type": "session_report_ai", "data": insights})
+        text = await generate_ai_insights(report, room)
+        if text:
+            await broadcast_all(room, {"type": "session_report_ai", "data": {"text": text}})
         else:
             print(f"[AI] No insights for room={room}")
 

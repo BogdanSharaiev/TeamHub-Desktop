@@ -510,6 +510,14 @@ void MainWindow::joinCollab()
             QMessageBox::information(this, "Collab", "You were kicked from the session.");
         });
     });
+    connect(session, &CollabSession::disconnected, this, [this]() {
+        if (pendingEndCollab)
+            return;
+        QTimer::singleShot(0, this, [this]() {
+            stopAllCollab();
+            outputPane->appendPlainText("[Collab] Host left — session ended.");
+        });
+    });
     connect(
         session,
         &CollabSession::connected,
@@ -594,13 +602,25 @@ void MainWindow::stopAllCollab()
     if (!session)
         return;
 
-    for (int i = 0; i < editorTabs->count(); ++i) {
-        auto *ed = qobject_cast<CodeEditor *>(editorTabs->widget(i));
-        if (!ed)
-            continue;
-        ed->clearRemoteCursors();
-        ed->collabActive = false;
-        markTabAsCollab(ed, false);
+    const bool isGuest = (session->role() == CollabSession::Role::Guest);
+
+    if (isGuest) {
+        for (int i = editorTabs->count() - 1; i >= 0; --i) {
+            auto *ed = qobject_cast<CodeEditor *>(editorTabs->widget(i));
+            if (ed && ed->collabActive) {
+                editorTabs->removeTab(i);
+                ed->deleteLater();
+            }
+        }
+    } else {
+        for (int i = 0; i < editorTabs->count(); ++i) {
+            auto *ed = qobject_cast<CodeEditor *>(editorTabs->widget(i));
+            if (!ed)
+                continue;
+            ed->clearRemoteCursors();
+            ed->collabActive = false;
+            markTabAsCollab(ed, false);
+        }
     }
 
     session->disconnectFromServer();
@@ -1345,13 +1365,9 @@ void MainWindow::openDiffTab(const QString &relPath, bool staged)
     const QString tabName = QFileInfo(relPath).fileName() + " (diff)";
 
     auto applyDiff = [&](CodeEditor *ed) {
-        ed->setReadOnly(false);
-        ed->loadFile(absPath);
-        ed->setReadOnly(true);
-        const auto stats = gitPanel_->manager()->diffLineStats(relPath, staged);
-        ed->applyDiffMarkers(stats.added, stats.removedAt);
-        for (const auto &r : stats.changedRanges)
-            ed->applyCharRangeMarker(r.line, r.colStart, r.colEnd);
+        const QString raw = staged ? gitPanel_->manager()->diffStaged(relPath)
+                                   : gitPanel_->manager()->diffUnstaged(relPath);
+        ed->applyDiffText(raw);
     };
 
     for (int i = 0; i < editorTabs->count(); ++i) {
@@ -2501,12 +2517,11 @@ void MainWindow::onSessionReportReady(const SessionReportData &report)
         reportDialog = nullptr;
     }
 
-    reportDialog = new SessionReportDialog(report, pendingEndCollab, this);
+    pendingEndCollab = true;
+    reportDialog = new SessionReportDialog(report, true, this);
 
-    if (pendingEndCollab) {
-        connect(reportDialog, &SessionReportDialog::sessionEnded, this, &MainWindow::stopAllCollab);
-        connect(reportDialog, &QDialog::rejected, this, &MainWindow::stopAllCollab);
-    }
+    connect(reportDialog, &SessionReportDialog::sessionEnded, this, &MainWindow::stopAllCollab);
+    connect(reportDialog, &QDialog::rejected, this, &MainWindow::stopAllCollab);
 
     connect(reportDialog, &QDialog::finished, this, [this]() {
         pendingEndCollab = false;

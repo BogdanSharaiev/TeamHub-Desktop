@@ -488,12 +488,7 @@ AiInsights CollabSession::parseAiInsights(const QJsonObject &data)
 {
     AiInsights ai;
     ai.available = true;
-    ai.summary = data["summary"].toString();
-
-    const QJsonObject work = data["participant_work"].toObject();
-    for (auto it = work.begin(); it != work.end(); ++it)
-        ai.participantWork[it.key().toInt()] = it.value().toString();
-
+    ai.text = data["text"].toString();
     return ai;
 }
 

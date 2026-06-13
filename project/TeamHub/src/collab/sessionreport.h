@@ -2,7 +2,6 @@
 #define SESSIONREPORT_H
 
 #include <QList>
-#include <QMap>
 #include <QString>
 #include <QStringList>
 
@@ -25,8 +24,7 @@ struct FileInfo
 struct AiInsights
 {
     bool available = false;
-    QString summary;
-    QMap<int, QString> participantWork;
+    QString text;
 };
 
 struct SessionReportData

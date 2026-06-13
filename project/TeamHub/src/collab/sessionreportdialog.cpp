@@ -12,19 +12,6 @@
 #include <QPushButton>
 #include <QScrollArea>
 
-const QColor SessionReportDialog::kColors[6] = {
-    QColor("#4ec9b0"),
-    QColor("#f44747"),
-    QColor("#d7ba7d"),
-    QColor("#7fb3d3"),
-    QColor("#a9dc76"),
-    QColor("#ab9df2"),
-};
-
-QColor SessionReportDialog::siteColor(int siteId)
-{
-    return kColors[qAbs(siteId) % 6];
-}
 
 QString SessionReportDialog::formatDuration(int secs) const
 {
@@ -35,8 +22,6 @@ QString SessionReportDialog::formatDuration(int secs) const
         return QString("%1m %2s").arg(m).arg(s);
     return QString("%1s").arg(s);
 }
-
-// ── constructor ───────────────────────────────────────────────────────────────
 
 SessionReportDialog::SessionReportDialog(const SessionReportData &report,
                                          bool endingSession,
@@ -72,7 +57,6 @@ SessionReportDialog::SessionReportDialog(const SessionReportData &report,
     root->setContentsMargins(14, 12, 14, 12);
     root->setSpacing(8);
 
-    // header
     auto *hdr = new QLabel(
         QString("<b style='color:#9cdcfe;font-size:13px;'>TEAMHUB SESSION REPORT</b>"
                 "&nbsp;&nbsp;"
@@ -91,7 +75,6 @@ SessionReportDialog::SessionReportDialog(const SessionReportData &report,
     sep->setFrameShape(QFrame::HLine);
     root->addWidget(sep);
 
-    // scroll area with all content
     auto *scroll = new QScrollArea;
     scroll->setWidgetResizable(true);
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -107,7 +90,6 @@ SessionReportDialog::SessionReportDialog(const SessionReportData &report,
     scroll->setWidget(contentWidget);
     root->addWidget(scroll, 1);
 
-    // buttons
     auto *btnRow = new QHBoxLayout;
     btnRow->setSpacing(6);
 
@@ -135,29 +117,23 @@ SessionReportDialog::SessionReportDialog(const SessionReportData &report,
     root->addLayout(btnRow);
 }
 
-// ── content ───────────────────────────────────────────────────────────────────
-
 void SessionReportDialog::buildContent(QVBoxLayout *layout)
 {
-    // ── participants ──────────────────────────────────────────────────────────
     auto *partGroup = new QGroupBox("PARTICIPANTS");
     auto *partLayout = new QVBoxLayout(partGroup);
     partLayout->setSpacing(6);
 
     for (const ParticipantStats &p : report.participants) {
         auto *card = new QWidget;
-        card->setStyleSheet(QString("QWidget { background:#252526; border:1px solid %1;"
-                                    " border-radius:4px; } QLabel { background:transparent; }")
-                                .arg(siteColor(p.siteId).name()));
+        card->setStyleSheet("QWidget { background:#252526; border:1px solid #3c3c3c;"
+                            " border-radius:4px; } QLabel { background:transparent; }");
         auto *cl = new QVBoxLayout(card);
         cl->setContentsMargins(10, 7, 10, 7);
         cl->setSpacing(3);
 
-        // title row
         auto *row1 = new QHBoxLayout;
         const QString badge = p.isHost ? " <span style='color:#f9c74f;'>[Host]</span>" : "";
-        auto *title = new QLabel(QString("<b style='color:%1;'>Site %2</b>%3")
-                                     .arg(siteColor(p.siteId).name())
+        auto *title = new QLabel(QString("<b>User %1</b>%2")
                                      .arg(p.siteId)
                                      .arg(badge));
         title->setTextFormat(Qt::RichText);
@@ -169,7 +145,6 @@ void SessionReportDialog::buildContent(QVBoxLayout *layout)
         row1->addWidget(timeL);
         cl->addLayout(row1);
 
-        // stats row
         auto *row2 = new QHBoxLayout;
         auto *insL = new QLabel(
             QString("<span style='color:#4ec9b0;font-size:13px;font-weight:bold;'>%1</span>"
@@ -187,7 +162,6 @@ void SessionReportDialog::buildContent(QVBoxLayout *layout)
         row2->addStretch();
         cl->addLayout(row2);
 
-        // files touched
         if (!p.filesTouched.isEmpty()) {
             auto *filesL = new QLabel(
                 QString("<span style='color:#808080;font-size:10px;'>%1</span>")
@@ -201,7 +175,6 @@ void SessionReportDialog::buildContent(QVBoxLayout *layout)
     }
     layout->addWidget(partGroup);
 
-    // ── files ─────────────────────────────────────────────────────────────────
     if (!report.files.isEmpty()) {
         auto *filesGroup = new QGroupBox("FILES EDITED");
         auto *fl = new QVBoxLayout(filesGroup);
@@ -210,20 +183,18 @@ void SessionReportDialog::buildContent(QVBoxLayout *layout)
         for (const FileInfo &fi : report.files) {
             QStringList editors;
             for (int sid : fi.editorSiteIds)
-                editors.append(QString("<span style='color:%1;'>Site %2</span>")
-                                   .arg(siteColor(sid).name())
-                                   .arg(sid));
+                editors.append(QString("User %1").arg(sid));
             auto *lbl = new QLabel(QString("<span style='color:#9cdcfe;'>%1</span>"
-                                           "<span style='color:#555;'> — </span>%2")
+                                           "<span style='color:#555;'> — </span>"
+                                           "<span style='color:#808080;'>%2</span>")
                                        .arg(fi.name)
-                                       .arg(editors.join("<span style='color:#555;'>, </span>")));
+                                       .arg(editors.join(", ")));
             lbl->setTextFormat(Qt::RichText);
             fl->addWidget(lbl);
         }
         layout->addWidget(filesGroup);
     }
 
-    // ── AI insights ───────────────────────────────────────────────────────────
     auto *aiGroup = new QGroupBox("AI INSIGHTS");
     auto *aiOuter = new QVBoxLayout(aiGroup);
     aiOuter->setSpacing(6);
@@ -242,7 +213,6 @@ void SessionReportDialog::buildContent(QVBoxLayout *layout)
 
     layout->addWidget(aiGroup);
 
-    // spinner
     spinnerTimer = new QTimer(this);
     connect(spinnerTimer, &QTimer::timeout, this, [this]() {
         const char *frames[] = {"●", "◕", "◑", "◔"};
@@ -259,53 +229,22 @@ void SessionReportDialog::buildContent(QVBoxLayout *layout)
     });
 }
 
-// ── AI update ─────────────────────────────────────────────────────────────────
-
 void SessionReportDialog::updateAiSection(const AiInsights &ai)
 {
     report.ai = ai;
     spinnerTimer->stop();
-    aiStatusLabel->setText("✓ Ready");
+    aiStatusLabel->setText("Ready");
     aiStatusLabel->setStyleSheet("color:#4ec9b0; font-size:11px; background:transparent;");
 
-    // summary
-    if (!ai.summary.isEmpty()) {
-        auto *lbl = new QLabel(ai.summary);
+    if (!ai.text.isEmpty()) {
+        auto *lbl = new QLabel(ai.text);
         lbl->setWordWrap(true);
         lbl->setTextFormat(Qt::PlainText);
         lbl->setStyleSheet("color:#d4d4d4; font-size:12px; background:transparent;");
         aiBodyLayout->addWidget(lbl);
+        aiBody->show();
     }
-
-    // per-participant descriptions
-    for (auto it = ai.participantWork.constBegin(); it != ai.participantWork.constEnd(); ++it) {
-        const int sid = it.key();
-        auto *row = new QWidget;
-        row->setStyleSheet("background:transparent;");
-        auto *rl = new QVBoxLayout(row);
-        rl->setContentsMargins(0, 4, 0, 0);
-        rl->setSpacing(2);
-
-        auto *nameL = new QLabel(
-            QString("<b style='color:%1;'>Site %2</b>").arg(siteColor(sid).name()).arg(sid));
-        nameL->setTextFormat(Qt::RichText);
-        nameL->setStyleSheet("background:transparent;");
-        rl->addWidget(nameL);
-
-        auto *descL = new QLabel(it.value());
-        descL->setWordWrap(true);
-        descL->setTextFormat(Qt::PlainText);
-        descL->setStyleSheet(
-            "color:#a0a0a0; font-size:11px; padding-left:10px; background:transparent;");
-        rl->addWidget(descL);
-
-        aiBodyLayout->addWidget(row);
-    }
-
-    aiBody->show();
 }
-
-// ── save ──────────────────────────────────────────────────────────────────────
 
 QString SessionReportDialog::reportToText() const
 {
@@ -318,7 +257,7 @@ QString SessionReportDialog::reportToText() const
 
     out += "PARTICIPANTS\n------------\n";
     for (const ParticipantStats &p : report.participants) {
-        out += QString("Site %1%2\n").arg(p.siteId).arg(p.isHost ? " (Host)" : "");
+        out += QString("User %1%2\n").arg(p.siteId).arg(p.isHost ? " (Host)" : "");
         out += QString("  Inserts: %1  Deletes: %2  Active: %3\n")
                    .arg(p.totalInserts)
                    .arg(p.totalDeletes)
@@ -333,19 +272,15 @@ QString SessionReportDialog::reportToText() const
         for (const FileInfo &fi : report.files) {
             QStringList eds;
             for (int sid : fi.editorSiteIds)
-                eds.append(QString("Site %1").arg(sid));
+                eds.append(QString("User %1").arg(sid));
             out += QString("%1 — %2\n").arg(fi.name).arg(eds.join(", "));
         }
         out += "\n";
     }
 
-    if (report.ai.available) {
+    if (report.ai.available && !report.ai.text.isEmpty()) {
         out += "AI INSIGHTS\n-----------\n";
-        out += report.ai.summary + "\n\n";
-        for (auto it = report.ai.participantWork.constBegin();
-             it != report.ai.participantWork.constEnd();
-             ++it)
-            out += QString("Site %1: %2\n").arg(it.key()).arg(it.value());
+        out += report.ai.text + "\n";
     }
     return out;
 }
@@ -406,17 +341,8 @@ void SessionReportDialog::saveJson()
     }
     root["files"] = files;
 
-    if (report.ai.available) {
-        QJsonObject ai;
-        ai["summary"] = report.ai.summary;
-        QJsonObject pw;
-        for (auto it = report.ai.participantWork.constBegin();
-             it != report.ai.participantWork.constEnd();
-             ++it)
-            pw[QString::number(it.key())] = it.value();
-        ai["participant_work"] = pw;
-        root["ai"] = ai;
-    }
+    if (report.ai.available && !report.ai.text.isEmpty())
+        root["ai_summary"] = report.ai.text;
 
     QFile f(path);
     if (f.open(QIODevice::WriteOnly))

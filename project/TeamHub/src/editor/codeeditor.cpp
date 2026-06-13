@@ -139,11 +139,20 @@ void CodeEditor::setupMargins()
     markerDefine(QsciScintilla::Background, MARKER_DIFF_REMOVED);
     setMarkerBackgroundColor(QColor("#4d1a1a"), MARKER_DIFF_REMOVED);
 
-    indicatorDefine(QsciScintilla::FullBoxIndicator, INDIC_DIFF_CHARS);
-    setIndicatorForegroundColor(QColor("#57e37a"), INDIC_DIFF_CHARS);
-    setIndicatorDrawUnder(true, INDIC_DIFF_CHARS);
-    SendScintilla(SCI_INDICSETALPHA, (unsigned long) INDIC_DIFF_CHARS, (long) 80);
-    SendScintilla(SCI_INDICSETOUTLINEALPHA, (unsigned long) INDIC_DIFF_CHARS, (long) 200);
+    markerDefine(QsciScintilla::Background, MARKER_DIFF_HUNK);
+    setMarkerBackgroundColor(QColor("#1e2a3a"), MARKER_DIFF_HUNK);
+
+    indicatorDefine(QsciScintilla::FullBoxIndicator, INDIC_DIFF_CHARS_ADDED);
+    setIndicatorForegroundColor(QColor("#3fb950"), INDIC_DIFF_CHARS_ADDED);
+    setIndicatorDrawUnder(true, INDIC_DIFF_CHARS_ADDED);
+    SendScintilla(SCI_INDICSETALPHA, (unsigned long) INDIC_DIFF_CHARS_ADDED, (long) 100);
+    SendScintilla(SCI_INDICSETOUTLINEALPHA, (unsigned long) INDIC_DIFF_CHARS_ADDED, (long) 220);
+
+    indicatorDefine(QsciScintilla::FullBoxIndicator, INDIC_DIFF_CHARS_REMOVED);
+    setIndicatorForegroundColor(QColor("#f85149"), INDIC_DIFF_CHARS_REMOVED);
+    setIndicatorDrawUnder(true, INDIC_DIFF_CHARS_REMOVED);
+    SendScintilla(SCI_INDICSETALPHA, (unsigned long) INDIC_DIFF_CHARS_REMOVED, (long) 100);
+    SendScintilla(SCI_INDICSETOUTLINEALPHA, (unsigned long) INDIC_DIFF_CHARS_REMOVED, (long) 220);
 }
 
 void CodeEditor::setupEditor()
@@ -1162,33 +1171,76 @@ void CodeEditor::clearDebugLine()
     }
 }
 
-void CodeEditor::applyDiffMarkers(const QList<int> &added, const QList<int> &removedAt)
-{
-    markerDeleteAll(MARKER_DIFF_ADDED);
-    markerDeleteAll(MARKER_DIFF_REMOVED);
-
-    for (int line : added)
-        markerAdd(line - 1, MARKER_DIFF_ADDED);
-
-    const int lastLine = qMax(0, lines() - 1);
-    for (int line : removedAt) {
-        const int markerLine = qMin(line - 1, lastLine);
-        if (markerLine >= 0)
-            markerAdd(markerLine, MARKER_DIFF_REMOVED);
-    }
-}
-
-void CodeEditor::applyCharRangeMarker(int line, int colStart, int colEnd)
-{
-    if (line < 1 || colStart >= colEnd)
-        return;
-    fillIndicatorRange(line - 1, colStart, line - 1, colEnd, INDIC_DIFF_CHARS);
-}
-
 void CodeEditor::clearDiffMarkers()
 {
     markerDeleteAll(MARKER_DIFF_ADDED);
     markerDeleteAll(MARKER_DIFF_REMOVED);
-    SendScintilla(SCI_SETINDICATORCURRENT, (unsigned long) INDIC_DIFF_CHARS);
+    markerDeleteAll(MARKER_DIFF_HUNK);
+    SendScintilla(SCI_SETINDICATORCURRENT, (unsigned long) INDIC_DIFF_CHARS_ADDED);
     SendScintilla(SCI_INDICATORCLEARRANGE, 0UL, (long) length());
+    SendScintilla(SCI_SETINDICATORCURRENT, (unsigned long) INDIC_DIFF_CHARS_REMOVED);
+    SendScintilla(SCI_INDICATORCLEARRANGE, 0UL, (long) length());
+}
+
+void CodeEditor::applyDiffText(const QString &raw)
+{
+    setReadOnly(false);
+    setText(raw);
+    setReadOnly(true);
+    clearDiffMarkers();
+
+    const QStringList diffLines = raw.split('\n');
+    QStringList pendingDels;
+    QList<int> pendingDelLineNos;
+
+    auto pairWithAdd = [&](int addedLineNo, const QString &newText) {
+        if (pendingDels.isEmpty())
+            return;
+        const QString oldText = pendingDels.takeFirst();
+        const int delLineNo = pendingDelLineNos.takeFirst();
+
+        int colStart = 0;
+        const int minLen = qMin(oldText.size(), newText.size());
+        while (colStart < minLen && oldText[colStart] == newText[colStart])
+            ++colStart;
+
+        int oldSuf = 0, newSuf = 0;
+        while (newSuf < (newText.size() - colStart) && oldSuf < (oldText.size() - colStart)
+               && oldText[oldText.size() - 1 - oldSuf] == newText[newText.size() - 1 - newSuf]) {
+            ++oldSuf;
+            ++newSuf;
+        }
+
+        const int remStart = colStart + 1;
+        const int remEnd = oldText.size() - oldSuf + 1;
+        const int addStart = colStart + 1;
+        const int addEnd = newText.size() - newSuf + 1;
+
+        if (remStart < remEnd)
+            fillIndicatorRange(delLineNo, remStart, delLineNo, remEnd, INDIC_DIFF_CHARS_REMOVED);
+        if (addStart < addEnd)
+            fillIndicatorRange(addedLineNo, addStart, addedLineNo, addEnd, INDIC_DIFF_CHARS_ADDED);
+    };
+
+    for (int i = 0; i < diffLines.size(); ++i) {
+        const QString &ln = diffLines[i];
+        if (ln.isEmpty())
+            continue;
+        const QChar ch = ln[0];
+        if (ln.startsWith("@@")) {
+            pendingDels.clear();
+            pendingDelLineNos.clear();
+            markerAdd(i, MARKER_DIFF_HUNK);
+        } else if (ch == '+' && !ln.startsWith("+++")) {
+            markerAdd(i, MARKER_DIFF_ADDED);
+            pairWithAdd(i, ln.mid(1));
+        } else if (ch == '-' && !ln.startsWith("---")) {
+            markerAdd(i, MARKER_DIFF_REMOVED);
+            pendingDels.append(ln.mid(1));
+            pendingDelLineNos.append(i);
+        } else if (ch == ' ') {
+            pendingDels.clear();
+            pendingDelLineNos.clear();
+        }
+    }
 }

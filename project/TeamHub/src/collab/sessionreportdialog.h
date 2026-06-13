@@ -37,9 +37,6 @@ private:
     QVBoxLayout *aiBodyLayout = nullptr;
     QTimer *spinnerTimer = nullptr;
     int spinnerStep = 0;
-
-    static const QColor kColors[6];
-    static QColor siteColor(int siteId);
 };
 
 #endif // SESSIONREPORTDIALOG_H
