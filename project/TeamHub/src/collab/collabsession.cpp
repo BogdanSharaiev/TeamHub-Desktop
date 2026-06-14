@@ -6,8 +6,9 @@
 CollabSession::CollabSession(int siteId, Role role, QObject *parent)
     : QObject(parent)
     , socket(new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, this))
-    , siteId_(siteId)
-    , role_(role)
+    , reconnectTimer(new QTimer(this))
+    , currentSiteId(siteId)
+    , currentRole(role)
 {
     connect(socket, &QWebSocket::connected, this, &CollabSession::onConnected);
     connect(socket, &QWebSocket::disconnected, this, &CollabSession::onDisconnected);
@@ -16,6 +17,9 @@ CollabSession::CollabSession(int siteId, Role role, QObject *parent)
             QOverload<QAbstractSocket::SocketError>::of(&QWebSocket::error),
             this,
             &CollabSession::onError);
+
+    reconnectTimer->setSingleShot(true);
+    connect(reconnectTimer, &QTimer::timeout, this, [this]() { socket->open(QUrl(serverUrl)); });
 }
 
 CollabSession::~CollabSession()
@@ -28,10 +32,16 @@ CollabSession::~CollabSession()
 
 void CollabSession::connectToServer(const QString &url)
 {
+    serverUrl = url;
+    wantReconnect = true;
+    reconnectAttempt = 0;
     socket->open(QUrl(url));
 }
+
 void CollabSession::disconnectFromServer()
 {
+    wantReconnect = false;
+    reconnectTimer->stop();
     socket->close();
 }
 
@@ -42,8 +52,8 @@ bool CollabSession::isConnected() const
 
 void CollabSession::setProject(const QString &projectRoot, const QStringList &relFiles)
 {
-    projectRoot_ = projectRoot;
-    fileList_ = relFiles;
+    rootPath = projectRoot;
+    files = relFiles;
 }
 
 void CollabSession::initFileCache(const QString &relPath, const QString &text)
@@ -77,8 +87,8 @@ void CollabSession::broadcastRunOutput(const QString &text)
 
 void CollabSession::notifyFileCreated(const QString &relPath, const QString &text)
 {
-    if (!fileList_.contains(relPath))
-        fileList_.append(relPath);
+    if (!files.contains(relPath))
+        files.append(relPath);
     textCache[relPath] = text;
 
     QJsonObject msg;
@@ -90,7 +100,7 @@ void CollabSession::notifyFileCreated(const QString &relPath, const QString &tex
 
 void CollabSession::notifyFileDeleted(const QString &relPath)
 {
-    fileList_.removeAll(relPath);
+    files.removeAll(relPath);
     textCache.remove(relPath);
     fileStates.remove(relPath);
     if (auto *mgr = active.take(relPath)) {
@@ -109,7 +119,7 @@ void CollabSession::sendCursorLeave(const QString &relPath)
     QJsonObject msg;
     msg["type"] = "cursor_leave";
     msg["file"] = relPath;
-    msg["siteId"] = siteId_;
+    msg["siteId"] = currentSiteId;
     sendMessage(msg);
 }
 
@@ -118,15 +128,15 @@ void CollabSession::sendFileFocus(const QString &relPath)
     QJsonObject msg;
     msg["type"] = "file_focus";
     msg["file"] = relPath;
-    msg["siteId"] = siteId_;
+    msg["siteId"] = currentSiteId;
     sendMessage(msg);
 }
 
 void CollabSession::notifyFileRenamed(const QString &oldPath, const QString &newPath)
 {
-    const int idx = fileList_.indexOf(oldPath);
+    const int idx = files.indexOf(oldPath);
     if (idx >= 0)
-        fileList_[idx] = newPath;
+        files[idx] = newPath;
 
     if (textCache.contains(oldPath))
         textCache[newPath] = textCache.take(oldPath);
@@ -155,7 +165,7 @@ RGAManager *CollabSession::getOrCreateRGA(const QString &relPath)
     if (active.size() >= MAX_ACTIVE)
         evictLRU();
 
-    auto *mgr = new RGAManager(siteId_, this);
+    auto *mgr = new RGAManager(currentSiteId, this);
     mgr->setFilePath(relPath);
     mgr->setSendFunction([this](QJsonObject msg) { sendMessage(msg); });
 
@@ -257,6 +267,8 @@ void CollabSession::applyOpToInactive(const QString &file, const QJsonObject &op
 
 void CollabSession::onConnected()
 {
+    reconnectAttempt = 0;
+    reconnectTimer->stop();
     sendRegister();
     emit connected();
 }
@@ -264,6 +276,7 @@ void CollabSession::onConnected()
 void CollabSession::onDisconnected()
 {
     emit disconnected();
+    scheduleReconnect();
 }
 
 void CollabSession::onRawMessage(const QString &message)
@@ -276,6 +289,24 @@ void CollabSession::onRawMessage(const QString &message)
 void CollabSession::onError(QAbstractSocket::SocketError)
 {
     emit errorOccurred(socket->errorString());
+    scheduleReconnect();
+}
+
+void CollabSession::scheduleReconnect()
+{
+    if (!wantReconnect || reconnectTimer->isActive())
+        return;
+    if (reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
+        wantReconnect = false;
+        emit errorOccurred("Connection lost. Failed to reconnect after "
+                           + QString::number(MAX_RECONNECT_ATTEMPTS) + " attempts.");
+        return;
+    }
+
+    ++reconnectAttempt;
+    const int delayMs = (1 << (reconnectAttempt - 1)) * 1000;
+    emit reconnecting(reconnectAttempt, MAX_RECONNECT_ATTEMPTS);
+    reconnectTimer->start(delayMs);
 }
 
 void CollabSession::handleMessage(const QJsonObject &obj)
@@ -299,13 +330,13 @@ void CollabSession::handleMessage(const QJsonObject &obj)
     }
 
     if (type == "project_init") {
-        QStringList files;
+        QStringList receivedFiles;
         for (const QJsonValue &v : obj["files"].toArray())
-            files.append(v.toString());
-        fileList_ = files;
+            receivedFiles.append(v.toString());
+        files = receivedFiles;
         if (obj["mode"].toString() == "readonly")
-            mode_ = Mode::ReadOnly;
-        emit projectInitReceived(obj["host"].toInt(), files);
+            mode = Mode::ReadOnly;
+        emit projectInitReceived(obj["host"].toInt(), receivedFiles);
         return;
     }
 
@@ -340,15 +371,15 @@ void CollabSession::handleMessage(const QJsonObject &obj)
 
     if (type == "file_focus") {
         const int sid = obj["siteId"].toInt();
-        if (sid != siteId_)
+        if (sid != currentSiteId)
             emit remoteFileFocusChanged(sid, file);
         return;
     }
 
     if (type == "file_create") {
         const QString fp = obj["file"].toString();
-        if (!fileList_.contains(fp))
-            fileList_.append(fp);
+        if (!files.contains(fp))
+            files.append(fp);
         textCache[fp] = obj["text"].toString();
         emit remoteFileCreated(fp);
         return;
@@ -356,7 +387,7 @@ void CollabSession::handleMessage(const QJsonObject &obj)
 
     if (type == "file_delete") {
         const QString fp = obj["file"].toString();
-        fileList_.removeAll(fp);
+        files.removeAll(fp);
         textCache.remove(fp);
         fileStates.remove(fp);
         if (auto *mgr = active.take(fp)) {
@@ -370,9 +401,9 @@ void CollabSession::handleMessage(const QJsonObject &obj)
     if (type == "file_rename") {
         const QString old = obj["old"].toString();
         const QString newer = obj["new"].toString();
-        const int idx = fileList_.indexOf(old);
+        const int idx = files.indexOf(old);
         if (idx >= 0)
-            fileList_[idx] = newer;
+            files[idx] = newer;
         if (textCache.contains(old))
             textCache[newer] = textCache.take(old);
         if (fileStates.contains(old))
@@ -390,8 +421,8 @@ void CollabSession::handleMessage(const QJsonObject &obj)
         if (!file.isEmpty()) {
             textCache[file] = obj["text"].toString();
             fileStates.remove(file);
-            if (!fileList_.contains(file))
-                fileList_.append(file);
+            if (!files.contains(file))
+                files.append(file);
         }
         if (!file.isEmpty() && active.contains(file))
             active[file]->handleIncomingMessage(obj);
@@ -402,7 +433,7 @@ void CollabSession::handleMessage(const QJsonObject &obj)
         if (!file.isEmpty()) {
             const int sid = obj["siteId"].toInt();
             const int pos = obj["position"].toInt();
-            if (sid != siteId_)
+            if (sid != currentSiteId)
                 cursorCache[file][sid] = pos;
             if (active.contains(file))
                 active[file]->handleIncomingMessage(obj);
@@ -496,14 +527,14 @@ void CollabSession::sendRegister()
 {
     QJsonObject msg;
     msg["type"] = "register";
-    msg["siteId"] = siteId_;
-    msg["role"] = (role_ == Role::Host) ? "host" : "guest";
+    msg["siteId"] = currentSiteId;
+    msg["role"] = (currentRole == Role::Host) ? "host" : "guest";
 
-    if (role_ == Role::Host) {
-        msg["mode"] = (mode_ == Mode::ReadOnly) ? "readonly" : "readwrite";
-        if (!fileList_.isEmpty()) {
+    if (currentRole == Role::Host) {
+        msg["mode"] = (mode == Mode::ReadOnly) ? "readonly" : "readwrite";
+        if (!files.isEmpty()) {
             QJsonArray arr;
-            for (const QString &f : fileList_)
+            for (const QString &f : files)
                 arr.append(f);
             msg["files"] = arr;
         }

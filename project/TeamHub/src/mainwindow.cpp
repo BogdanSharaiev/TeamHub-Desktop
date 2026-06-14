@@ -5,6 +5,7 @@
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
@@ -14,6 +15,7 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QInputDialog>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMenuBar>
@@ -244,6 +246,8 @@ void MainWindow::setupMenuBar()
         }
     });
 
+    gitMenu->addAction("Clone Repository...", this, &MainWindow::cloneRepo);
+
     gitMenu->addSeparator();
 
     auto *actRefresh = gitMenu->addAction("Refresh Status", this, [this]() {
@@ -432,6 +436,16 @@ void MainWindow::startCollab(const QString &room,
     connect(session, &CollabSession::errorOccurred, this, [this](const QString &err) {
         outputPane->appendPlainText("[Collab] Error: " + err);
     });
+    connect(session, &CollabSession::reconnecting, this, [this](int attempt, int maxAttempts) {
+        const int delayS = 1 << (attempt - 1);
+        const QString msg = QString("Reconnecting... attempt %1/%2 (in %3s)")
+                                .arg(attempt)
+                                .arg(maxAttempts)
+                                .arg(delayS);
+        outputPane->appendPlainText("[Collab] " + msg);
+        if (collabStatusLabel)
+            collabStatusLabel->setText(msg);
+    });
     connect(session, &CollabSession::kicked, this, [this]() {
         QTimer::singleShot(0, this, [this]() {
             stopAllCollab();
@@ -503,6 +517,16 @@ void MainWindow::joinCollab()
             &MainWindow::onSessionAiInsightsReady);
     connect(session, &CollabSession::errorOccurred, this, [this](const QString &err) {
         outputPane->appendPlainText("[Collab] Error: " + err);
+    });
+    connect(session, &CollabSession::reconnecting, this, [this](int attempt, int maxAttempts) {
+        const int delayS = 1 << (attempt - 1);
+        const QString msg = QString("Reconnecting... attempt %1/%2 (in %3s)")
+                                .arg(attempt)
+                                .arg(maxAttempts)
+                                .arg(delayS);
+        outputPane->appendPlainText("[Collab] " + msg);
+        if (collabStatusLabel)
+            collabStatusLabel->setText(msg);
     });
     connect(session, &CollabSession::kicked, this, [this]() {
         QTimer::singleShot(0, this, [this]() {
@@ -2006,6 +2030,85 @@ void MainWindow::openFolder()
 
     if (gitPanel_)
         gitPanel_->setRepoPath(path);
+}
+
+void MainWindow::cloneRepo()
+{
+    QDialog dlg(this);
+    dlg.setWindowTitle("Clone Repository");
+    dlg.setMinimumWidth(420);
+
+    auto *layout = new QVBoxLayout(&dlg);
+
+    auto *urlEdit = new QLineEdit(&dlg);
+    urlEdit->setPlaceholderText("https://github.com/user/repo.git");
+    layout->addWidget(new QLabel("Repository URL:", &dlg));
+    layout->addWidget(urlEdit);
+
+    auto *pathRow = new QHBoxLayout;
+    auto *pathEdit = new QLineEdit(&dlg);
+    pathEdit->setPlaceholderText("Select destination folder...");
+    auto *browseBtn = new QPushButton("Browse...", &dlg);
+    pathRow->addWidget(pathEdit, 1);
+    pathRow->addWidget(browseBtn);
+    layout->addWidget(new QLabel("Destination folder:", &dlg));
+    layout->addLayout(pathRow);
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    layout->addWidget(buttons);
+
+    connect(browseBtn, &QPushButton::clicked, &dlg, [&]() {
+        const QString dir = QFileDialog::getExistingDirectory(&dlg, "Select Destination Folder");
+        if (!dir.isEmpty())
+            pathEdit->setText(dir);
+    });
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+
+    const QString url = urlEdit->text().trimmed();
+    const QString dest = pathEdit->text().trimmed();
+    if (url.isEmpty() || dest.isEmpty())
+        return;
+
+    outputPane->appendPlainText("[Git] Cloning " + url + " into " + dest + "...");
+    bottomDock->setVisible(true);
+
+    auto *proc = new QProcess(this);
+    proc->setWorkingDirectory(dest);
+    proc->setProcessChannelMode(QProcess::MergedChannels);
+
+    connect(proc, &QProcess::readyReadStandardOutput, this, [this, proc]() {
+        outputPane->appendPlainText(QString::fromLocal8Bit(proc->readAllStandardOutput()).trimmed());
+    });
+
+    connect(proc,
+            QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this,
+            [this, proc, url, dest](int code, QProcess::ExitStatus) {
+                if (code == 0) {
+                    const QString repoName = url.section('/', -1).remove(".git");
+                    const QString clonedPath = dest + "/" + repoName;
+                    outputPane->appendPlainText("[Git] Clone successful.");
+                    fileBrowser->setRootPath(clonedPath);
+                    clearTabs();
+                    editor = new CodeEditor(editorTabs);
+                    editorTabs->addTab(editor, "Untitled");
+                    currentFilePath.clear();
+                    setWindowTitle(repoName + " — TeamHub");
+                    terminal->setWorkingDirectory(clonedPath);
+                    if (gitPanel_)
+                        gitPanel_->setRepoPath(clonedPath);
+                } else {
+                    outputPane->appendPlainText("[Git] Clone failed (exit code "
+                                                + QString::number(code) + ").");
+                }
+                proc->deleteLater();
+            });
+
+    proc->start("git", {"clone", url, dest + "/" + url.section('/', -1).remove(".git")});
 }
 
 bool MainWindow::saveFile()

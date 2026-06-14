@@ -171,6 +171,7 @@ private slots:
     void newFile();
     void openFile();
     void openFolder();
+    void cloneRepo();
     void runFile();
     void startDebugging();
     void stopDebugging();

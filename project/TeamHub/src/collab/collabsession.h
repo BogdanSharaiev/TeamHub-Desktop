@@ -7,6 +7,7 @@
 #include <QMap>
 #include <QObject>
 #include <QStringList>
+#include <QTimer>
 #include <QWebSocket>
 
 #include "../rga/rgamanager.h"
@@ -43,12 +44,12 @@ public:
     void requestSessionReport();
     void endSession();
 
-    Role role() const { return role_; }
-    Mode collabMode() const { return mode_; }
-    void setCollabMode(Mode m) { mode_ = m; }
-    int siteId() const { return siteId_; }
-    QStringList fileList() const { return fileList_; }
-    QString projectRoot() const { return projectRoot_; }
+    Role role() const { return currentRole; }
+    Mode collabMode() const { return mode; }
+    void setCollabMode(Mode m) { mode = m; }
+    int siteId() const { return currentSiteId; }
+    QStringList fileList() const { return files; }
+    QString projectRoot() const { return rootPath; }
 
     bool hasTextCache(const QString &relPath) const { return textCache.contains(relPath); }
     QString cachedText(const QString &relPath) const { return textCache.value(relPath); }
@@ -59,6 +60,7 @@ signals:
     void disconnected();
     void kicked();
     void errorOccurred(const QString &err);
+    void reconnecting(int attempt, int maxAttempts);
     void projectInitReceived(int hostSiteId, const QStringList &files);
     void runOutputReceived(const QString &text);
     void usersUpdated(QList<int> siteIds);
@@ -91,14 +93,22 @@ private:
     static SessionReportData parseSessionReport(const QJsonObject &data);
     static AiInsights parseAiInsights(const QJsonObject &data);
 
+    void scheduleReconnect();
+
     static constexpr int MAX_ACTIVE = 5;
+    static constexpr int MAX_RECONNECT_ATTEMPTS = 5;
 
     QWebSocket *socket;
-    int siteId_;
-    Role role_;
-    Mode mode_ = Mode::ReadWrite;
-    QString projectRoot_;
-    QStringList fileList_;
+    QTimer *reconnectTimer;
+    QString serverUrl;
+    int reconnectAttempt = 0;
+    bool wantReconnect = false;
+
+    int currentSiteId;
+    Role currentRole;
+    Mode mode = Mode::ReadWrite;
+    QString rootPath;
+    QStringList files;
 
     QMap<QString, RGAManager *> active;
     QMap<QString, FileState> fileStates;
