@@ -12,7 +12,6 @@
 #include <QPushButton>
 #include <QScrollArea>
 
-
 QString SessionReportDialog::formatDuration(int secs) const
 {
     const int h = secs / 3600, m = (secs % 3600) / 60, s = secs % 60;
@@ -132,10 +131,10 @@ void SessionReportDialog::buildContent(QVBoxLayout *layout)
         cl->setSpacing(3);
 
         auto *row1 = new QHBoxLayout;
+        const QString displayName = p.username.isEmpty() ? QString("user_%1").arg(p.siteId)
+                                                         : p.username;
         const QString badge = p.isHost ? " <span style='color:#f9c74f;'>[Host]</span>" : "";
-        auto *title = new QLabel(QString("<b>User %1</b>%2")
-                                     .arg(p.siteId)
-                                     .arg(badge));
+        auto *title = new QLabel(QString("<b>%1</b>%2").arg(displayName).arg(badge));
         title->setTextFormat(Qt::RichText);
         row1->addWidget(title);
         row1->addStretch();
@@ -181,9 +180,13 @@ void SessionReportDialog::buildContent(QVBoxLayout *layout)
         fl->setSpacing(4);
 
         for (const FileInfo &fi : report.files) {
-            QStringList editors;
-            for (int sid : fi.editorSiteIds)
-                editors.append(QString("User %1").arg(sid));
+            const QStringList &editors = fi.editorNames.isEmpty() ? [&] {
+                QStringList tmp;
+                for (int sid : fi.editorSiteIds)
+                    tmp.append(QString("user_%1").arg(sid));
+                return tmp;
+            }()
+                                                                  : fi.editorNames;
             auto *lbl = new QLabel(QString("<span style='color:#9cdcfe;'>%1</span>"
                                            "<span style='color:#555;'> — </span>"
                                            "<span style='color:#808080;'>%2</span>")
@@ -257,7 +260,8 @@ QString SessionReportDialog::reportToText() const
 
     out += "PARTICIPANTS\n------------\n";
     for (const ParticipantStats &p : report.participants) {
-        out += QString("User %1%2\n").arg(p.siteId).arg(p.isHost ? " (Host)" : "");
+        const QString dn = p.username.isEmpty() ? QString("user_%1").arg(p.siteId) : p.username;
+        out += QString("%1%2\n").arg(dn).arg(p.isHost ? " (Host)" : "");
         out += QString("  Inserts: %1  Deletes: %2  Active: %3\n")
                    .arg(p.totalInserts)
                    .arg(p.totalDeletes)
@@ -270,9 +274,13 @@ QString SessionReportDialog::reportToText() const
     if (!report.files.isEmpty()) {
         out += "FILES EDITED\n------------\n";
         for (const FileInfo &fi : report.files) {
-            QStringList eds;
-            for (int sid : fi.editorSiteIds)
-                eds.append(QString("User %1").arg(sid));
+            const QStringList eds = fi.editorNames.isEmpty() ? [&] {
+                QStringList t;
+                for (int s : fi.editorSiteIds)
+                    t << QString("user_%1").arg(s);
+                return t;
+            }()
+                                                             : fi.editorNames;
             out += QString("%1 — %2\n").arg(fi.name).arg(eds.join(", "));
         }
         out += "\n";
@@ -317,6 +325,7 @@ void SessionReportDialog::saveJson()
     for (const ParticipantStats &p : report.participants) {
         QJsonObject po;
         po["site_id"] = p.siteId;
+        po["username"] = p.username.isEmpty() ? QString("user_%1").arg(p.siteId) : p.username;
         po["is_host"] = p.isHost;
         po["active_sec"] = p.activeSec;
         po["total_inserts"] = p.totalInserts;

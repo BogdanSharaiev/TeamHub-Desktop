@@ -18,6 +18,7 @@
 #include <QTreeWidget>
 #include <QWidgetAction>
 
+#include "auth/authmanager.h"
 #include "collab/collabsession.h"
 #include "collab/sessionreport.h"
 #include "collab/sessionreportdialog.h"
@@ -94,7 +95,7 @@ private:
     QWidget *collabNoSessionPane = nullptr;
     QWidget *collabInSessionPane = nullptr;
     QMap<int, QString> peerFiles;
-    QList<int> peerSiteIds;
+    QMap<int, QString> peerNames;
     QString currentCollabFile;
 
     // Session report
@@ -111,6 +112,12 @@ private:
     QAction *actDebugStepOut = nullptr;
     QAction *actDebugStop = nullptr;
     QAction *actDebugMain = nullptr;
+
+    // Auth
+    AuthManager *auth = nullptr;
+    QToolButton *btnProfile = nullptr;
+    void setupAuthManager();
+    void updateProfileButton();
 
     // Voice
     VoiceChat *voiceChat = nullptr;
@@ -155,8 +162,9 @@ private:
     void wireEditorToSession(CodeEditor *ed, const QString &relPath);
 
     QString toSessionKey(const QString &editorPath) const;
+    QMap<QString, QString> collectCurrentFileTexts() const;
 
-    void onCollabUsersUpdated(QList<int> siteIds);
+    void onCollabUsersUpdated(QMap<int, QString> users);
     void onRemoteFileFocusChanged(int siteId, const QString &file);
     void refreshCollabUsersList();
 

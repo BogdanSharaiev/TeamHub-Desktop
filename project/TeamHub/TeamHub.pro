@@ -15,6 +15,8 @@ win32 {
 }
 
 SOURCES += \
+    src/auth/authmanager.cpp \
+    src/auth/authdialog.cpp \
     src/collab/collabsession.cpp \
     src/collab/sessionreportdialog.cpp \
     src/debug/debugadapter.cpp \
@@ -31,6 +33,8 @@ SOURCES += \
     src/voicechat/voicechat.cpp
 
 HEADERS += \
+    src/auth/authmanager.h \
+    src/auth/authdialog.h \
     src/collab/collabsession.h \
     src/collab/sessionreport.h \
     src/collab/sessionreportdialog.h \

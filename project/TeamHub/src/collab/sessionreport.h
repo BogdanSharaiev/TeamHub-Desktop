@@ -2,12 +2,14 @@
 #define SESSIONREPORT_H
 
 #include <QList>
+#include <QMap>
 #include <QString>
 #include <QStringList>
 
 struct ParticipantStats
 {
     int siteId = 0;
+    QString username;
     bool isHost = false;
     int activeSec = 0;
     int totalInserts = 0;
@@ -19,6 +21,7 @@ struct FileInfo
 {
     QString name;
     QList<int> editorSiteIds;
+    QStringList editorNames;
 };
 
 struct AiInsights

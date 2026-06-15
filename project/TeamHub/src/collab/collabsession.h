@@ -6,6 +6,7 @@
 #include <QJsonObject>
 #include <QMap>
 #include <QObject>
+#include <QString>
 #include <QStringList>
 #include <QTimer>
 #include <QWebSocket>
@@ -22,6 +23,7 @@ public:
     enum class Mode { ReadWrite, ReadOnly };
 
     explicit CollabSession(int siteId, Role role, QObject *parent = nullptr);
+    void setUsername(const QString &name) { username = name; }
     ~CollabSession() override;
 
     void connectToServer(const QString &url);
@@ -41,6 +43,7 @@ public:
     void sendCursorLeave(const QString &relPath);
     void sendFileFocus(const QString &relPath);
     void kickUser(int siteId);
+    void sendFinalStates(const QMap<QString, QString> &texts);
     void requestSessionReport();
     void endSession();
 
@@ -63,7 +66,7 @@ signals:
     void reconnecting(int attempt, int maxAttempts);
     void projectInitReceived(int hostSiteId, const QStringList &files);
     void runOutputReceived(const QString &text);
-    void usersUpdated(QList<int> siteIds);
+    void usersUpdated(QMap<int, QString> users);
     void remoteFileCreated(const QString &relPath);
     void remoteFileDeleted(const QString &relPath);
     void remoteFileRenamed(const QString &oldPath, const QString &newPath);
@@ -107,6 +110,7 @@ private:
     int currentSiteId;
     Role currentRole;
     Mode mode = Mode::ReadWrite;
+    QString username;
     QString rootPath;
     QStringList files;
 

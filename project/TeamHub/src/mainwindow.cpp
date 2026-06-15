@@ -1,5 +1,7 @@
 #include "mainwindow.h"
 
+#include "auth/authdialog.h"
+
 #include <QApplication>
 #include <QButtonGroup>
 #include <QClipboard>
@@ -61,6 +63,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     outputPane->appendPlainText("[TeamHub] Ready.");
     updateWindowTitle();
+    setupAuthManager();
 
     connect(voiceChat, &VoiceChat::statusChanged, this, &MainWindow::onVoipStatusChanged);
     connect(voiceChat, &VoiceChat::peerConnected, this, &MainWindow::onVoipPeerConnected);
@@ -359,6 +362,8 @@ void MainWindow::startCollab(const QString &room,
 
     session = new CollabSession(siteId, CollabSession::Role::Host, this);
     session->setCollabMode(mode);
+    if (auth && auth->isLoggedIn())
+        session->setUsername(auth->currentUser().username);
 
     const QString projectRoot = fileBrowser->rootPath();
 
@@ -499,6 +504,8 @@ void MainWindow::joinCollab()
     const int siteId = static_cast<int>(QRandomGenerator::global()->bounded(100000u, 999999u));
 
     session = new CollabSession(siteId, CollabSession::Role::Guest, this);
+    if (auth && auth->isLoggedIn())
+        session->setUsername(auth->currentUser().username);
 
     connect(session, &CollabSession::projectInitReceived, this, &MainWindow::onSessionProjectInit);
     connect(session, &CollabSession::runOutputReceived, this, &MainWindow::onSessionRunOutput);
@@ -590,12 +597,6 @@ void MainWindow::wireEditorToManager(CodeEditor *ed, RGAManager *mgr)
             ed,
             &CodeEditor::removeRemoteCursor,
             Qt::UniqueConnection);
-
-    connect(mgr,
-            &RGAManager::usersUpdated,
-            this,
-            &MainWindow::onCollabUsersUpdated,
-            Qt::UniqueConnection);
 }
 
 void MainWindow::wireEditorToSession(CodeEditor *ed, const QString &relPath)
@@ -606,6 +607,9 @@ void MainWindow::wireEditorToSession(CodeEditor *ed, const QString &relPath)
     const auto cached = session->fileCursors(relPath);
     for (auto it = cached.cbegin(); it != cached.cend(); ++it)
         ed->updateRemoteCursor(it.key(), it.value());
+
+    for (auto it = peerNames.cbegin(); it != peerNames.cend(); ++it)
+        ed->setRemotePeerName(it.key(), it.value());
 
     if (session->role() == CollabSession::Role::Guest
         && session->collabMode() == CollabSession::Mode::ReadOnly)
@@ -618,6 +622,32 @@ QString MainWindow::toSessionKey(const QString &editorPath) const
         return editorPath;
     const QString root = session->projectRoot();
     return root.isEmpty() ? editorPath : QDir(root).relativeFilePath(editorPath);
+}
+
+QMap<QString, QString> MainWindow::collectCurrentFileTexts() const
+{
+    QMap<QString, QString> texts;
+    if (!session)
+        return texts;
+
+    const QString root = session->projectRoot();
+
+    for (int i = 0; i < editorTabs->count(); ++i) {
+        const auto *ed = qobject_cast<const CodeEditor *>(editorTabs->widget(i));
+        if (!ed)
+            continue;
+        const QString abs = ed->getFilePath();
+        if (abs.isEmpty())
+            continue;
+        const QString rel = root.isEmpty() ? abs : QDir(root).relativeFilePath(abs);
+        texts[rel] = ed->text();
+    }
+
+    for (const QString &f : session->fileList())
+        if (!texts.contains(f) && session->hasTextCache(f))
+            texts[f] = session->cachedText(f);
+
+    return texts;
 }
 
 void MainWindow::stopAllCollab()
@@ -652,7 +682,7 @@ void MainWindow::stopAllCollab()
     session = nullptr;
 
     peerFiles.clear();
-    peerSiteIds.clear();
+    peerNames.clear();
     currentCollabFile.clear();
 
     if (collabUsersList)
@@ -687,8 +717,10 @@ void MainWindow::refreshCollabUsersList()
     if (!collabUsersList || !session)
         return;
     collabUsersList->clear();
-    for (int id : peerSiteIds) {
-        QString label = QString("User #%1").arg(id);
+    for (auto it = peerNames.cbegin(); it != peerNames.cend(); ++it) {
+        const int id = it.key();
+        const QString name = it.value().isEmpty() ? QString("user_%1").arg(id) : it.value();
+        QString label = name;
         if (id == session->siteId())
             label += " (you)";
         const QString f = peerFiles.value(id);
@@ -700,14 +732,20 @@ void MainWindow::refreshCollabUsersList()
     }
 }
 
-void MainWindow::onCollabUsersUpdated(QList<int> siteIds)
+void MainWindow::onCollabUsersUpdated(QMap<int, QString> users)
 {
-    peerSiteIds = siteIds;
+    peerNames = users;
     refreshCollabUsersList();
-    if (collabStatusLabel && !siteIds.isEmpty()) {
+
+    for (int i = 0; i < editorTabs->count(); ++i) {
+        if (auto *ed = qobject_cast<CodeEditor *>(editorTabs->widget(i)))
+            for (auto it = users.cbegin(); it != users.cend(); ++it)
+                ed->setRemotePeerName(it.key(), it.value());
+    }
+    if (collabStatusLabel && !users.isEmpty()) {
         const QString role = (session && session->role() == CollabSession::Role::Host) ? "Hosting"
                                                                                        : "Guest";
-        collabStatusLabel->setText(QString("%1 — %2 user(s)").arg(role).arg(siteIds.size()));
+        collabStatusLabel->setText(QString("%1 — %2 user(s)").arg(role).arg(users.size()));
     }
 }
 
@@ -839,10 +877,33 @@ void MainWindow::setupActivityBar()
     btnVoip->setObjectName("activityBtnVoip");
     vbox->addWidget(btnVoip);
 
+    btnProfile = new QToolButton;
+    btnProfile->setText("Account");
+    btnProfile->setToolTip("Sign in");
+    btnProfile->setCheckable(false);
+    btnProfile->setFixedSize(48, 48);
+    btnProfile->setObjectName("activityBtnProfile");
+    vbox->addWidget(btnProfile);
+
     connect(btnFiles, &QToolButton::clicked, this, [this] { onActivityButton(0); });
     connect(btnTasks, &QToolButton::clicked, this, [this] { onActivityButton(1); });
     connect(btnTeam, &QToolButton::clicked, this, [this] { onActivityButton(2); });
     connect(btnVoip, &QToolButton::clicked, this, &MainWindow::toggleVoipDock);
+    connect(btnProfile, &QToolButton::clicked, this, [this] {
+        if (!auth || !auth->isLoggedIn()) {
+            AuthDialog dlg(auth, this);
+            if (dlg.exec() == QDialog::Accepted)
+                updateProfileButton();
+            return;
+        }
+        QMenu menu(this);
+        const QString uname = auth->currentUser().username;
+        auto *title = menu.addAction(uname);
+        title->setEnabled(false);
+        menu.addSeparator();
+        menu.addAction("Sign out", this, [this] { auth->logout(); });
+        menu.exec(btnProfile->mapToGlobal(btnProfile->rect().topRight()));
+    });
 }
 
 void MainWindow::setupLeftPanel()
@@ -931,8 +992,10 @@ void MainWindow::setupLeftPanel()
     btnSessionReport = new QPushButton("Session Report");
     btnSessionReport->setObjectName("voipBtn");
     connect(btnSessionReport, &QPushButton::clicked, this, [this]() {
-        if (session)
-            session->requestSessionReport();
+        if (!session)
+            return;
+        session->sendFinalStates(collectCurrentFileTexts());
+        session->requestSessionReport();
     });
     inVl->addWidget(btnSessionReport);
 
@@ -1592,6 +1655,15 @@ QToolButton#activityBtn:hover,
 QToolButton#activityBtnVoip:hover { color: #cccccc; }
 QToolButton#activityBtn:checked   { color: #ffffff; border-left-color: #007acc; }
 QToolButton#activityBtnVoip:checked { color: #ffffff; border-left-color: #007acc; }
+QToolButton#activityBtnProfile {
+    color: #858585;
+    background: transparent;
+    border: none;
+    border-left: 2px solid transparent;
+    font-size: 9px;
+}
+QToolButton#activityBtnProfile:hover { color: #cccccc; }
+QToolButton#activityBtnProfile[loggedIn="true"] { color: #4ec9b0; }
 
 /* ── Left Panel ─────────────────────────────────────────────── */
 QWidget#leftPanel {
@@ -2559,7 +2631,8 @@ void MainWindow::onCollabUserContextMenu(const QPoint &pos)
     QMenu menu(this);
 
     const QString relPath = peerFiles.value(targetSiteId);
-    QAction *gotoAct = menu.addAction(QString("Перейти до User #%1").arg(targetSiteId));
+    const QString peerName = peerNames.value(targetSiteId, QString("user_%1").arg(targetSiteId));
+    QAction *gotoAct = menu.addAction(QString("Перейти до %1").arg(peerName));
     gotoAct->setEnabled(!relPath.isEmpty());
     connect(gotoAct, &QAction::triggered, this, [this, targetSiteId, relPath]() {
         if (!session || relPath.isEmpty())
@@ -2586,12 +2659,12 @@ void MainWindow::onCollabUserContextMenu(const QPoint &pos)
 
     if (session->role() == CollabSession::Role::Host) {
         menu.addSeparator();
-        QAction *kickAct = menu.addAction(QString("Kick User #%1").arg(targetSiteId));
-        connect(kickAct, &QAction::triggered, this, [this, targetSiteId]() {
+        QAction *kickAct = menu.addAction(QString("Kick %1").arg(peerName));
+        connect(kickAct, &QAction::triggered, this, [this, targetSiteId, peerName]() {
             if (!session)
                 return;
             session->kickUser(targetSiteId);
-            outputPane->appendPlainText(QString("[Collab] Kicked user #%1").arg(targetSiteId));
+            outputPane->appendPlainText(QString("[Collab] Kicked %1").arg(peerName));
         });
     }
 
@@ -2605,6 +2678,7 @@ void MainWindow::onEndCollabRequested()
         return;
     }
     pendingEndCollab = true;
+    session->sendFinalStates(collectCurrentFileTexts());
     session->endSession();
     QTimer::singleShot(3000, this, [this]() {
         if (pendingEndCollab && (!reportDialog || !reportDialog->isVisible()))
@@ -2639,4 +2713,42 @@ void MainWindow::onSessionAiInsightsReady(const AiInsights &ai)
 {
     if (reportDialog)
         reportDialog->updateAiSection(ai);
+}
+
+/* ── Auth ────────────────────────────────────────────────────── */
+
+void MainWindow::setupAuthManager()
+{
+    auth = new AuthManager(this);
+    auth->loadSavedSession();
+
+    connect(auth, &AuthManager::sessionRestored, this, [this](const AuthManager::UserInfo &) {
+        updateProfileButton();
+    });
+    connect(auth, &AuthManager::loginSuccess, this, [this](const AuthManager::UserInfo &) {
+        updateProfileButton();
+    });
+    connect(auth, &AuthManager::logoutFinished, this, [this] { updateProfileButton(); });
+}
+
+void MainWindow::updateProfileButton()
+{
+    if (!btnProfile)
+        return;
+
+    const bool loggedIn = auth && auth->isLoggedIn();
+    if (loggedIn) {
+        const QString uname = auth->currentUser().username;
+        const QString letter = uname.isEmpty() ? QStringLiteral("?")
+                                               : QString(uname.at(0).toUpper());
+        btnProfile->setText(letter);
+        btnProfile->setToolTip(uname + "\n\nClick to sign out");
+        btnProfile->setProperty("loggedIn", true);
+    } else {
+        btnProfile->setText("Account");
+        btnProfile->setToolTip("Sign in");
+        btnProfile->setProperty("loggedIn", false);
+    }
+    btnProfile->style()->unpolish(btnProfile);
+    btnProfile->style()->polish(btnProfile);
 }

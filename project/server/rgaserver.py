@@ -32,6 +32,7 @@ rooms: dict[str, set] = {}
 room_users: dict[str, dict] = {}
 room_host: dict[str, int | None] = {}
 room_mode: dict[str, str] = {}
+room_usernames: dict[str, dict[int, str]] = {}
 project_files: dict[str, list] = {}
 file_snapshots: dict[str, dict] = {}
 file_history: dict[str, dict] = {}
@@ -39,6 +40,7 @@ cursor_state: dict[str, dict] = {}
 user_file_state: dict[str, dict] = {}
 room_start_time: dict[str, float] = {}
 room_user_joins: dict[str, dict] = {}
+final_file_states: dict[str, dict[str, str]] = {}
 
 
 def get_room(path: str) -> str:
@@ -69,8 +71,13 @@ async def broadcast_all(room: str, payload: dict):
 
 
 async def broadcast_user_list(room: str):
-    ids = [v for v in room_users.get(room, {}).values() if v is not None]
-    msg = {"type": "user_list", "siteIds": ids}
+    names = room_usernames.get(room, {})
+    users = [
+        {"siteId": sid, "username": names.get(sid, f"user_{sid}")}
+        for sid in room_users.get(room, {}).values()
+        if sid is not None
+    ]
+    msg = {"type": "user_list", "users": users}
     for ws in list(rooms.get(room, set())):
         await send_json(ws, msg)
 
@@ -145,6 +152,7 @@ def build_report(room: str) -> dict:
         if sid is not None:
             all_sids.add(sid)
 
+    names = room_usernames.get(room, {})
     participants = []
     for sid in sorted(all_sids):
         join_ts = join_times.get(sid, start)
@@ -152,6 +160,7 @@ def build_report(room: str) -> dict:
         files_touched = sorted(user_files.get(sid, set()))
         participants.append({
             "site_id": sid,
+            "username": names.get(sid, f"user_{sid}"),
             "is_host": (sid == host_sid),
             "active_sec": active_s,
             "total_inserts": ins.get(sid, 0),
@@ -174,57 +183,152 @@ def build_report(room: str) -> dict:
     }
 
 
-def get_user_contributions(room: str) -> dict[int, dict[str, str]]:
-    MAX_CHARS = 800
-    result: dict[int, dict[str, str]] = {}
-    for fname, ops in file_history.get(room, {}).items():
-        for op in ops:
-            if op["type"] != "insert":
-                continue
-            sid = op["node"]["id"]["siteId"]
-            ch = op["node"].get("value", "")
-            result.setdefault(sid, {}).setdefault(fname, "")
-            if len(result[sid][fname]) < MAX_CHARS:
-                result[sid][fname] += ch
+def replay_rga(room: str, fname: str) -> list[tuple[str, int]]:
+    snap = file_snapshots.get(room, {}).get(fname, {})
+    text = snap.get("text", "")
+
+    ROOT = (0, 0)
+    nodes: dict = {ROOT: {"enc": ROOT, "parent": None, "val": "", "siteId": -1, "tombstone": True, "next": None}}
+
+    prev = ROOT
+    for i, ch in enumerate(text):
+        enc = (i + 1, 0)
+        nodes[enc] = {"enc": enc, "parent": prev, "val": ch, "siteId": 0, "tombstone": False, "next": None}
+        nodes[prev]["next"] = enc
+        prev = enc
+
+    def rga_insert(enc, parent_enc, val, site_id):
+        if enc in nodes or parent_enc not in nodes:
+            return
+        nodes[enc] = {"enc": enc, "parent": parent_enc, "val": val, "siteId": site_id, "tombstone": False, "next": None}
+
+        skipped: set = set()
+        prev_local = parent_enc
+        curr = nodes[parent_enc]["next"]
+        while curr is not None:
+            n = nodes[curr]
+            if n["parent"] == parent_enc:
+                if curr > enc:
+                    skipped.add(curr)
+                    prev_local = curr
+                    curr = n["next"]
+                else:
+                    break
+            elif n["parent"] in skipped:
+                skipped.add(curr)
+                prev_local = curr
+                curr = n["next"]
+            else:
+                break
+
+        nodes[prev_local]["next"] = enc
+        nodes[enc]["next"] = curr
+
+    for op in file_history.get(room, {}).get(fname, []):
+        t = op.get("type")
+        if t == "insert":
+            n = op.get("node", {})
+            nid = n.get("id", {})
+            par = n.get("parent", {})
+            enc = (nid.get("timestamp", 0), nid.get("siteId", 0))
+            parent_enc = (par.get("timestamp", 0), par.get("siteId", 0))
+            rga_insert(enc, parent_enc, n.get("val", ""), nid.get("siteId", 0))
+        elif t == "delete":
+            did = op.get("id", {})
+            enc = (did.get("timestamp", 0), did.get("siteId", 0))
+            if enc in nodes:
+                nodes[enc]["tombstone"] = True
+        elif t == "undelete":
+            uid = op.get("id", {})
+            enc = (uid.get("timestamp", 0), uid.get("siteId", 0))
+            if enc in nodes:
+                nodes[enc]["tombstone"] = False
+
+    result = []
+    curr = nodes[ROOT]["next"]
+    while curr is not None:
+        n = nodes[curr]
+        if not n["tombstone"]:
+            result.append((n["val"], n["siteId"]))
+        curr = n["next"]
     return result
+
+
+def get_line_attribution(room: str, fname: str, names: dict) -> str:
+    chars = replay_rga(room, fname)
+
+    lines: list[list[tuple[str, int]]] = []
+    current: list[tuple[str, int]] = []
+    for ch, sid in chars:
+        if ch == '\n':
+            lines.append(current)
+            current = []
+        else:
+            current.append((ch, sid))
+    if current:
+        lines.append(current)
+
+    out = []
+    for i, line_chars in enumerate(lines):
+        text = "".join(ch for ch, _ in line_chars)
+        if not line_chars:
+            continue
+        counts: dict[int, int] = {}
+        for _, sid in line_chars:
+            counts[sid] = counts.get(sid, 0) + 1
+        dominant = max(counts, key=counts.get)
+        author = "existing" if dominant == 0 else names.get(dominant, f"user_{dominant}")
+        out.append(f"L{i + 1:03d} | {author} | {text}")
+    return "\n".join(out)
 
 
 def build_ai_prompt(report: dict, room: str) -> str:
     duration_min = report["duration_sec"] // 60
+    names = room_usernames.get(room, {})
 
-    contributions = get_user_contributions(room)
-    users_info = []
+    all_fnames = sorted(
+        set(file_history.get(room, {}).keys()) | set(file_snapshots.get(room, {}).keys())
+    )
+    file_sections = []
+    for fname in all_fnames:
+        attribution = get_line_attribution(room, fname, names)
+        if attribution.strip():
+            file_sections.append(f"[{fname}]:\n{attribution}")
+
+    stats_lines = []
     for p in report["participants"]:
         sid = p["site_id"]
+        uname = p.get("username", f"user_{sid}")
         role = "host" if p["is_host"] else "guest"
-        lines = [f"User {sid} ({role}), {p['total_inserts']} inserts, {p['total_deletes']} deletes:"]
-        user_files = contributions.get(sid, {})
-        if user_files:
-            for fname, text in user_files.items():
-                snippet = text.strip()[:600]
-                if snippet:
-                    lines.append(f"  [{fname}]: {snippet}")
-        else:
-            lines.append("  (no recorded insertions)")
-        users_info.append("\n".join(lines))
-
-    file_sections = []
-    for fname, snap in file_snapshots.get(room, {}).items():
-        content = snap.get("text", "").strip()[:800]
-        if content:
-            file_sections.append(f"[{fname}]:\n{content}")
+        files_str = ", ".join(p.get("files_touched", [])) or "—"
+        stats_lines.append(
+            f"  {uname} ({role}): {p['total_inserts']} вставок, "
+            f"{p['total_deletes']} видалень, файли: {files_str}"
+        )
 
     prompt = f"Спільна сесія програмування, тривалість: {duration_min} хв.\n\n"
+
     if file_sections:
-        prompt += "=== Файли проекту ===\n" + "\n\n".join(file_sections) + "\n\n"
-    prompt += "=== Внески учасників ===\n" + "\n\n".join(users_info) + "\n\n"
+        prompt += (
+                "=== АВТОРСТВО ПО РЯДКАХ (git blame стиль) ===\n"
+                "(Кожен рядок: номер | автор | текст. "
+                "Автор — учасник який написав більшість символів у цьому рядку. "
+                "'existing' = рядки що існували до сесії і не були суттєво змінені.)\n\n"
+                + "\n\n".join(file_sections)
+                + "\n\n"
+        )
+
+    if stats_lines:
+        prompt += "=== СТАТИСТИКА УЧАСНИКІВ ===\n" + "\n".join(stats_lines) + "\n\n"
+
     prompt += (
         "Проаналізуй сесію і напиши звіт українською мовою у такому форматі:\n\n"
         "Спочатку — один абзац із загальним підсумком: що загалом було зроблено за сесію.\n\n"
-        "Потім — окремий абзац для КОЖНОГО учасника починаючи з 'User N:' де N — номер учасника. "
-        "У цьому абзаці детально поясни що конкретно зробив цей учасник: "
-        "які функції написав, які класи чи методи додав, що оптимізував або рефакторив, "
-        "які зміни вніс у логіку. Якщо видно назви функцій чи змінних — згадай їх. "
+        "Потім — окремий абзац для КОЖНОГО учасника, починаючи з їхнього імені. "
+        "Детально поясни що конкретно зробив цей учасник: "
+        "які функції написав, які класи чи методи додав, що змінив. "
+        "Якщо видно назви функцій чи змінних — згадай їх. "
+        "Авторство по рядках — це точна інформація, орієнтуйся насамперед на неї. "
         "Якщо учасник мало що вніс — так і напиши.\n\n"
         "Відповідай тільки звичайним текстом без JSON, без markdown, без зірочок."
     )
@@ -294,6 +398,7 @@ async def handle_client(websocket):
     room_users.setdefault(room, {})[websocket] = None
     room_host.setdefault(room, None)
     room_mode.setdefault(room, "readwrite")
+    room_usernames.setdefault(room, {})
     project_files.setdefault(room, [])
     file_snapshots.setdefault(room, {})
     file_history.setdefault(room, {})
@@ -321,6 +426,8 @@ async def handle_client(websocket):
                 room_users[room][websocket] = sid
                 if sid is not None:
                     room_user_joins[room][sid] = time.time()
+                    uname = payload.get("username", f"user_{sid}")
+                    room_usernames[room][sid] = uname
                 if role == "host":
                     room_host[room] = sid
                     files = payload.get("files", [])
@@ -413,6 +520,12 @@ async def handle_client(websocket):
                 await broadcast(room, websocket, payload)
                 continue
 
+            if t == "final_state":
+                files = payload.get("files", {})
+                if isinstance(files, dict):
+                    final_file_states.setdefault(room, {}).update(files)
+                continue
+
             if t in ("session_report_request", "end_session"):
                 await handle_session_report(room)
                 continue
@@ -427,9 +540,10 @@ async def handle_client(websocket):
         user_file_state[room].pop(websocket, None)
 
         if not rooms[room]:
-            for d in (room_users, room_host, room_mode, project_files,
-                      file_snapshots, file_history, cursor_state,
-                      user_file_state, room_start_time, room_user_joins):
+            for d in (room_users, room_host, room_mode, room_usernames,
+                      project_files, file_snapshots, file_history, cursor_state,
+                      user_file_state, room_start_time, room_user_joins,
+                      final_file_states):
                 d.pop(room, None)
             del rooms[room]
         else:

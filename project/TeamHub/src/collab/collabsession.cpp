@@ -346,11 +346,13 @@ void CollabSession::handleMessage(const QJsonObject &obj)
     }
 
     if (type == "user_list") {
-        QList<int> ids;
-        for (const QJsonValue &v : obj["siteIds"].toArray())
-            if (!v.isNull())
-                ids.append(v.toInt());
-        emit usersUpdated(ids);
+        QMap<int, QString> users;
+        for (const QJsonValue &v : obj["users"].toArray()) {
+            const QJsonObject u = v.toObject();
+            const int sid = u["siteId"].toInt();
+            users[sid] = u["username"].toString();
+        }
+        emit usersUpdated(users);
         return;
     }
 
@@ -468,6 +470,18 @@ void CollabSession::kickUser(int siteId)
     sendMessage(msg);
 }
 
+void CollabSession::sendFinalStates(const QMap<QString, QString> &texts)
+{
+    QJsonObject files;
+    for (auto it = texts.cbegin(); it != texts.cend(); ++it)
+        files[it.key()] = it.value();
+
+    QJsonObject msg;
+    msg["type"] = "final_state";
+    msg["files"] = files;
+    sendMessage(msg);
+}
+
 void CollabSession::requestSessionReport()
 {
     QJsonObject msg;
@@ -494,6 +508,7 @@ SessionReportData CollabSession::parseSessionReport(const QJsonObject &data)
         const QJsonObject po = pv.toObject();
         ParticipantStats p;
         p.siteId = po["site_id"].toInt();
+        p.username = po["username"].toString();
         p.isHost = po["is_host"].toBool();
         p.activeSec = po["active_sec"].toInt();
         p.totalInserts = po["total_inserts"].toInt();
@@ -503,12 +518,19 @@ SessionReportData CollabSession::parseSessionReport(const QJsonObject &data)
         r.participants.append(p);
     }
 
+    QMap<int, QString> siteToName;
+    for (const ParticipantStats &p : r.participants)
+        siteToName[p.siteId] = p.username;
+
     for (const QJsonValue &fv : data["files"].toArray()) {
         const QJsonObject fo = fv.toObject();
         FileInfo fi;
         fi.name = fo["name"].toString();
-        for (const QJsonValue &ev : fo["editors"].toArray())
-            fi.editorSiteIds.append(ev.toInt());
+        for (const QJsonValue &ev : fo["editors"].toArray()) {
+            const int sid = ev.toInt();
+            fi.editorSiteIds.append(sid);
+            fi.editorNames.append(siteToName.value(sid, QString("user_%1").arg(sid)));
+        }
         r.files.append(fi);
     }
 
@@ -528,6 +550,7 @@ void CollabSession::sendRegister()
     QJsonObject msg;
     msg["type"] = "register";
     msg["siteId"] = currentSiteId;
+    msg["username"] = username.isEmpty() ? QString("user_%1").arg(currentSiteId) : username;
     msg["role"] = (currentRole == Role::Host) ? "host" : "guest";
 
     if (currentRole == Role::Host) {
