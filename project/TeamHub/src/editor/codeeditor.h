@@ -58,6 +58,7 @@ public:
 
     bool applyingRemote = false;
     bool collabActive = false;
+    bool suppressLocalInsert = false;
 
 public slots:
     void resetZoom();
@@ -81,6 +82,7 @@ public slots:
     void updateRemoteCursor(int siteId, int scintillaPos);
     void removeRemoteCursor(int siteId);
     void clearRemoteCursors();
+    void setRemotePeerName(int siteId, const QString &name);
     void paintRemoteCursors(QWidget *overlay);
 
     int remoteCursorPos(int siteId) const;
@@ -114,6 +116,7 @@ private:
     QList<ErrorInfo> errorList;
 
     QMap<int, int> remoteCursorPositions;
+    QMap<int, QString> remoteCursorNames;
     QWidget *cursorOverlay = nullptr;
     static const QColor kCursorColors[4];
 

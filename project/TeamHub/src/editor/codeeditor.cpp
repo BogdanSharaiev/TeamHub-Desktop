@@ -287,7 +287,9 @@ void CodeEditor::keyPressEvent(QKeyEvent *event)
                     deleteSelection();
                 int pos = SendScintilla(SCI_GETCURRENTPOS);
                 QChar sendChar = (ch == '\r') ? QChar('\n') : ch;
+                suppressLocalInsert = true;
                 QsciScintilla::keyPressEvent(event);
+                suppressLocalInsert = false;
                 emit localInsert(pos, sendChar);
 
                 if (sendChar == '\n') {
@@ -375,8 +377,10 @@ bool CodeEditor::autoCloseChar(QKeyEvent *event)
             shiftRemoteCursors(selStart + openByteLen + selByteLen, closeByteLen);
         } else {
             int pos = SendScintilla(SCI_GETCURRENTPOS);
+            suppressLocalInsert = true;
             QsciScintilla::keyPressEvent(event);
             insert(QString(close));
+            suppressLocalInsert = false;
 
             emit localInsert(pos, open);
             emit localInsert(pos + 1, close);
@@ -810,6 +814,9 @@ void CodeEditor::redo()
 
 void CodeEditor::onCharAdded(int ch)
 {
+    if (applyingRemote || suppressLocalInsert)
+        return;
+
     int pos = SendScintilla(SCI_GETCURRENTPOS);
 
     if (ch == 0)
@@ -1069,6 +1076,14 @@ void CodeEditor::removeRemoteCursor(int siteId)
 void CodeEditor::clearRemoteCursors()
 {
     remoteCursorPositions.clear();
+    remoteCursorNames.clear();
+    if (cursorOverlay)
+        cursorOverlay->update();
+}
+
+void CodeEditor::setRemotePeerName(int siteId, const QString &name)
+{
+    remoteCursorNames[siteId] = name;
     if (cursorOverlay)
         cursorOverlay->update();
 }
@@ -1120,7 +1135,8 @@ void CodeEditor::paintRemoteCursors(QWidget *overlay)
         painter.setPen(QPen(color, 2));
         painter.drawLine(x, y, x, y + lineHeight);
 
-        const QString label = QString("U%1").arg(siteId);
+        const QString rawName = remoteCursorNames.value(siteId);
+        const QString label = rawName.isEmpty() ? QString("U%1").arg(siteId) : rawName.left(12);
         const int labelW = fm.horizontalAdvance(label) + 6;
         const int labelH = fm.height() + 2;
         const int labelY = y - labelH;
