@@ -23,6 +23,7 @@ struct PeerInfo
     int id = 0;
     QString ip;
     quint16 port = 0;
+    QString name;
     bool connected = false;
     QAudioSink *sink = nullptr;
     QIODevice *output = nullptr;
@@ -46,9 +47,12 @@ public:
     bool isCallActive() const;
     bool isConnected() const;
     void setRoom(const QString &r);
+    void setAuthToken(const QString &t) { authToken = t; }
+    void setTeamId(const QString &t) { teamId = t; }
+    void setUsername(const QString &n) { username = n; }
     int id() const { return publicId; }
     bool isHost() const { return isRoomHost_; }
-    void requestRooms();
+    QString peerName(int peerId) const;
 
     void setPeerMuted(int peerId, bool muted);
     void setPeerVolume(int peerId, float volume);
@@ -71,7 +75,7 @@ signals:
     void connectedToServer();
     void disconnectedFromServer();
     void peersUpdated(const QStringList &ids);
-    void roomsUpdated(const QMap<QString, QStringList> &roomUsers);
+    void registrationDenied(const QString &reason);
 
 private slots:
     void onUdpReadyRead();
@@ -121,6 +125,10 @@ private:
     QString room = "default";
     QString mode = "hybrid"; // relay / hybrid / p2p
     bool isRoomHost_ = false;
+
+    QString authToken;
+    QString teamId;
+    QString username;
 };
 
 #endif // VOICECHAT_H

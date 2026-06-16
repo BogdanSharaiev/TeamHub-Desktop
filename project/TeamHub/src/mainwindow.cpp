@@ -1,6 +1,8 @@
 #include "mainwindow.h"
 
 #include "auth/authdialog.h"
+#include "avatar/avatar.h"
+#include "config/appconfig.h"
 
 #include <QApplication>
 #include <QButtonGroup>
@@ -48,9 +50,11 @@ MainWindow::MainWindow(QWidget *parent)
     setupMainToolBar();
     setupCentralWidget();
     setupBottomDock();
-    setupVoipDock();
     setupStatusBar();
     applyTheme();
+
+    connect(teamsPanel, &TeamsPanel::logMessage, outputPane, &QPlainTextEdit::appendPlainText);
+    teamsPanel->setVoiceChat(voiceChat);
 
     if (gitPanel_ && !fileBrowser->rootPath().isEmpty())
         gitPanel_->setRepoPath(fileBrowser->rootPath());
@@ -64,86 +68,9 @@ MainWindow::MainWindow(QWidget *parent)
     outputPane->appendPlainText("[TeamHub] Ready.");
     updateWindowTitle();
     setupAuthManager();
-
-    connect(voiceChat, &VoiceChat::statusChanged, this, &MainWindow::onVoipStatusChanged);
-    connect(voiceChat, &VoiceChat::peerConnected, this, &MainWindow::onVoipPeerConnected);
-    connect(voiceChat, &VoiceChat::peerDisconnected, this, &MainWindow::onVoipPeerDisconnected);
-
-    connect(voiceChat, &VoiceChat::peersUpdated, this, &MainWindow::onVoipPeersUpdated);
-    connect(voiceChat,
-            &VoiceChat::roomsUpdated,
-            this,
-            [this](const QMap<QString, QStringList> &roomUsers) {
-                QSet<QString> expanded;
-                for (int i = 0; i < voipTree->topLevelItemCount(); i++) {
-                    auto *it = voipTree->topLevelItem(i);
-                    if (it->isExpanded())
-                        expanded.insert(it->data(0, Qt::UserRole).toString());
-                }
-
-                voipTree->clear();
-
-                for (auto it = roomUsers.cbegin(); it != roomUsers.cend(); ++it) {
-                    const QString &roomName = it.key();
-                    const QStringList &userIds = it.value();
-
-                    auto *roomItem = new QTreeWidgetItem(voipTree);
-                    roomItem->setText(0, u8"\U0001F50A " + roomName);
-                    roomItem->setData(0, Qt::UserRole, roomName);
-
-                    const bool isCurrent = (roomName == currentVoiceRoom);
-                    QFont f = roomItem->font(0);
-                    f.setBold(isCurrent);
-                    roomItem->setFont(0, f);
-                    if (isCurrent)
-                        roomItem->setForeground(0, QColor("#7fb3d3"));
-
-                    for (const QString &uid : userIds) {
-                        auto *userItem = new QTreeWidgetItem(roomItem);
-                        const int peerId = uid.toInt();
-                        const bool isMe = (peerId == voiceChat->id());
-                        const QString label = isMe ? QString("You")
-                                                   : voipNicknames.value(peerId, uid);
-                        userItem->setText(0, u8"\U0001F464 " + label);
-                        userItem->setForeground(0, isMe ? QColor("#7fb3d3") : QColor("#aaaaaa"));
-                        userItem->setData(0, Qt::UserRole, peerId);
-                    }
-
-                    roomItem->setExpanded(isCurrent || expanded.contains(roomName));
-                }
-            });
 }
 
 MainWindow::~MainWindow() = default;
-
-void MainWindow::onVoipStatusChanged(const QString &status)
-{
-    if (voipStatusLabel)
-        voipStatusLabel->setText(status);
-}
-
-void MainWindow::onVoipCallClicked()
-{
-    if (voiceChat->isCallActive()) {
-        voiceChat->stopCall();
-        voipCallBtn->setText("Start Call");
-    } else {
-        voiceChat->startCall();
-        voipCallBtn->setText("Stop Call");
-    }
-}
-
-void MainWindow::onVoipPeerConnected(const QString &ip, quint16 port)
-{
-    Q_UNUSED(ip)
-    Q_UNUSED(port)
-}
-
-void MainWindow::onVoipPeerDisconnected(const QString &ip, quint16 port)
-{
-    Q_UNUSED(ip)
-    Q_UNUSED(port)
-}
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
@@ -224,7 +151,7 @@ void MainWindow::setupMenuBar()
                         this,
                         &MainWindow::toggleBottomDock,
                         QKeySequence("Ctrl+J"));
-    viewMenu->addAction("Toggle &VoIP Panel", this, &MainWindow::toggleVoipDock);
+    viewMenu->addAction("Toggle &Team Panel", this, [this] { onActivityButton(2); });
     viewMenu->addSeparator();
     viewMenu->addAction("Zoom &In", this, [this] { editor->zoomIn(); }, QKeySequence::ZoomIn);
     viewMenu->addAction("Zoom &Out", this, [this] { editor->zoomOut(); }, QKeySequence::ZoomOut);
@@ -312,7 +239,7 @@ void MainWindow::setupMenuBar()
     teamMenu->addSeparator();
     teamMenu->addAction("Members")->setEnabled(false);
     teamMenu->addAction("Share Session")->setEnabled(false);
-    teamMenu->addAction("Voice Call", this, &MainWindow::toggleVoipDock);
+    teamMenu->addAction("Voice Call", this, [this] { onActivityButton(2); });
 }
 
 void MainWindow::setupMainToolBar()
@@ -348,8 +275,8 @@ void MainWindow::setupMainToolBar()
     });
 
     auto *actCall = tb->addAction("Call");
-    actCall->setToolTip("Toggle Voice");
-    connect(actCall, &QAction::triggered, this, &MainWindow::toggleVoipDock);
+    actCall->setToolTip("Open Team voice rooms");
+    connect(actCall, &QAction::triggered, this, [this] { onActivityButton(2); });
 }
 
 void MainWindow::startCollab(const QString &room,
@@ -362,8 +289,10 @@ void MainWindow::startCollab(const QString &room,
 
     session = new CollabSession(siteId, CollabSession::Role::Host, this);
     session->setCollabMode(mode);
-    if (auth && auth->isLoggedIn())
+    if (auth && auth->isLoggedIn()) {
         session->setUsername(auth->currentUser().username);
+        session->setAvatarUrl(auth->currentUser().avatarUrl);
+    }
 
     const QString projectRoot = fileBrowser->rootPath();
 
@@ -482,7 +411,7 @@ void MainWindow::startCollab(const QString &room,
         },
         Qt::SingleShotConnection);
 
-    session->connectToServer(QString("ws://localhost:8765/%1").arg(room));
+    session->connectToServer(QString("%1/%2").arg(AppConfig::rgaServerUrl(), room));
     outputPane->appendPlainText("[Collab] Starting room: " + room);
 }
 
@@ -504,8 +433,10 @@ void MainWindow::joinCollab()
     const int siteId = static_cast<int>(QRandomGenerator::global()->bounded(100000u, 999999u));
 
     session = new CollabSession(siteId, CollabSession::Role::Guest, this);
-    if (auth && auth->isLoggedIn())
+    if (auth && auth->isLoggedIn()) {
         session->setUsername(auth->currentUser().username);
+        session->setAvatarUrl(auth->currentUser().avatarUrl);
+    }
 
     connect(session, &CollabSession::projectInitReceived, this, &MainWindow::onSessionProjectInit);
     connect(session, &CollabSession::runOutputReceived, this, &MainWindow::onSessionRunOutput);
@@ -564,7 +495,7 @@ void MainWindow::joinCollab()
         },
         Qt::SingleShotConnection);
 
-    session->connectToServer(QString("ws://localhost:8765/%1").arg(room));
+    session->connectToServer(QString("%1/%2").arg(AppConfig::rgaServerUrl(), room));
     outputPane->appendPlainText("[Collab] Joining room: " + room);
 }
 
@@ -683,6 +614,7 @@ void MainWindow::stopAllCollab()
 
     peerFiles.clear();
     peerNames.clear();
+    peerAvatars.clear();
     currentCollabFile.clear();
 
     if (collabUsersList)
@@ -712,6 +644,32 @@ void MainWindow::markTabAsCollab(CodeEditor *ed, bool on)
     editorTabs->setTabText(idx, on ? (QString::fromUtf8("◎ ") + name) : name);
 }
 
+QWidget *MainWindow::makeCollabUserRow(int id, const QString &label, const QString &avatarUrl)
+{
+    auto *row = new QWidget;
+    row->setStyleSheet("background: transparent;");
+    auto *h = new QHBoxLayout(row);
+    h->setContentsMargins(6, 3, 6, 3);
+    h->setSpacing(8);
+
+    const int size = 24;
+    auto *avatar = new QLabel;
+    avatar->setFixedSize(size, size);
+    const QPixmap fallback = Avatar::letterPixmap(Avatar::initialFor(label),
+                                                  Avatar::colorForId(QString::number(id)),
+                                                  size);
+    Avatar::load(avatar, avatarUrl, fallback, size, [avatar](QPixmap pix) {
+        avatar->setPixmap(pix);
+    });
+    h->addWidget(avatar);
+
+    auto *nameLbl = new QLabel(label);
+    nameLbl->setStyleSheet("color: #d4d4d4; font-size: 12px;");
+    h->addWidget(nameLbl, 1);
+
+    return row;
+}
+
 void MainWindow::refreshCollabUsersList()
 {
     if (!collabUsersList || !session)
@@ -726,15 +684,19 @@ void MainWindow::refreshCollabUsersList()
         const QString f = peerFiles.value(id);
         if (!f.isEmpty())
             label += QString("  [%1]").arg(QFileInfo(f).fileName());
-        auto *item = new QListWidgetItem(label);
+        auto *item = new QListWidgetItem;
+        item->setSizeHint(QSize(0, 32));
         item->setData(Qt::UserRole, id);
         collabUsersList->addItem(item);
+        collabUsersList->setItemWidget(item, makeCollabUserRow(id, label, peerAvatars.value(id)));
     }
 }
 
 void MainWindow::onCollabUsersUpdated(QMap<int, QString> users)
 {
     peerNames = users;
+    if (session)
+        peerAvatars = session->avatars();
     refreshCollabUsersList();
 
     for (int i = 0; i < editorTabs->count(); ++i) {
@@ -793,13 +755,13 @@ void MainWindow::onTabCloseRequested(int tabIndex)
 
 void MainWindow::setSidePanelPage(int index)
 {
-    const QStringList titles = {"EXPLORER", "TASKS", "TEAM", "COLLAB"};
+    const QStringList titles = {"EXPLORER", "COLLAB", "TEAM"};
 
     if (index == activeSidePanel && leftPanel->isVisible()) {
         leftPanel->setVisible(false);
         activeSidePanel = -1;
         btnFiles->setChecked(false);
-        btnTasks->setChecked(false);
+        btnCollab->setChecked(false);
         btnTeam->setChecked(false);
         return;
     }
@@ -810,7 +772,7 @@ void MainWindow::setSidePanelPage(int index)
     leftTitle->setText(titles.value(index, "PANEL"));
 
     btnFiles->setChecked(index == 0);
-    btnTasks->setChecked(index == 1);
+    btnCollab->setChecked(index == 1);
     btnTeam->setChecked(index == 2);
 }
 
@@ -861,21 +823,13 @@ void MainWindow::setupActivityBar()
     };
 
     btnFiles = makeBtn("Files", "Explorer  (Ctrl+B)");
-    btnTasks = makeBtn("Tasks", "Task Manager");
+    btnCollab = makeBtn("Collab", "Collaboration");
     btnTeam = makeBtn("Team", "Team");
 
     vbox->addWidget(btnFiles);
-    vbox->addWidget(btnTasks);
+    vbox->addWidget(btnCollab);
     vbox->addWidget(btnTeam);
     vbox->addStretch(1);
-
-    auto *btnCollab = makeBtn("Collab", "Collaboration");
-    vbox->addWidget(btnCollab);
-    connect(btnCollab, &QToolButton::clicked, this, [this] { onActivityButton(3); });
-
-    btnVoip = makeBtn("VoIP", "Voice");
-    btnVoip->setObjectName("activityBtnVoip");
-    vbox->addWidget(btnVoip);
 
     btnProfile = new QToolButton;
     btnProfile->setText("Account");
@@ -885,10 +839,28 @@ void MainWindow::setupActivityBar()
     btnProfile->setObjectName("activityBtnProfile");
     vbox->addWidget(btnProfile);
 
+    auto requireAuth = [this](const QString &feature) {
+        if (auth && auth->isLoggedIn())
+            return true;
+        QMessageBox::information(this, "Sign in required", "Sign in to use " + feature + ".");
+        return false;
+    };
+
     connect(btnFiles, &QToolButton::clicked, this, [this] { onActivityButton(0); });
-    connect(btnTasks, &QToolButton::clicked, this, [this] { onActivityButton(1); });
-    connect(btnTeam, &QToolButton::clicked, this, [this] { onActivityButton(2); });
-    connect(btnVoip, &QToolButton::clicked, this, &MainWindow::toggleVoipDock);
+    connect(btnCollab, &QToolButton::clicked, this, [this, requireAuth] {
+        if (!requireAuth("collaboration")) {
+            btnCollab->setChecked(false);
+            return;
+        }
+        onActivityButton(1);
+    });
+    connect(btnTeam, &QToolButton::clicked, this, [this, requireAuth] {
+        if (!requireAuth("the team panel")) {
+            btnTeam->setChecked(false);
+            return;
+        }
+        onActivityButton(2);
+    });
     connect(btnProfile, &QToolButton::clicked, this, [this] {
         if (!auth || !auth->isLoggedIn()) {
             AuthDialog dlg(auth, this);
@@ -898,8 +870,7 @@ void MainWindow::setupActivityBar()
         }
         QMenu menu(this);
         const QString uname = auth->currentUser().username;
-        auto *title = menu.addAction(uname);
-        title->setEnabled(false);
+        menu.addAction(uname, this, [this] { openProfileDialog(); });
         menu.addSeparator();
         menu.addAction("Sign out", this, [this] { auth->logout(); });
         menu.exec(btnProfile->mapToGlobal(btnProfile->rect().topRight()));
@@ -932,15 +903,7 @@ void MainWindow::setupLeftPanel()
     fileBrowser->setRootPath("C:/TeamHub-Desktop/project/TeamHub");
     leftStack->addWidget(fileBrowser);
 
-    taskList = new QListWidget;
-    taskList->setObjectName("taskList");
-    taskList->addItem("Task Manager");
-    leftStack->addWidget(taskList);
-
-    teamList = new QListWidget;
-    teamList->setObjectName("teamList");
-    teamList->addItem("Team Panel");
-    leftStack->addWidget(teamList);
+    teamsPanel = new TeamsPanel;
 
     vbox->addWidget(leftStack, 1);
     auto *collabPane = new QWidget;
@@ -1008,6 +971,7 @@ void MainWindow::setupLeftPanel()
     vl->addWidget(collabInSessionPane, 1);
 
     leftStack->addWidget(collabPane);
+    leftStack->addWidget(teamsPanel);
 
     connect(fileBrowser, &FileBrowser::fileDoubleClicked, this, &MainWindow::openFileFromBrowser);
 }
@@ -1476,63 +1440,6 @@ void MainWindow::openDiffTab(const QString &relPath, bool staged)
     editorTabs->setCurrentIndex(idx);
 }
 
-void MainWindow::setupVoipDock()
-{
-    voipDock = new QDockWidget("Voice Rooms", this);
-    voipDock->setObjectName("voipDock");
-
-    auto *panel = new QWidget;
-    panel->setObjectName("voipPanel");
-
-    auto *root = new QVBoxLayout(panel);
-    root->setContentsMargins(10, 10, 10, 10);
-    root->setSpacing(8);
-
-    voipStatusLabel = new QLabel("Disconnected");
-    voipStatusLabel->setObjectName("stubLabel");
-    root->addWidget(voipStatusLabel);
-
-    voipTree = new QTreeWidget;
-    voipTree->setObjectName("voipTree");
-    voipTree->setHeaderHidden(true);
-    voipTree->setIndentation(16);
-    voipTree->setRootIsDecorated(true);
-    voipTree->setExpandsOnDoubleClick(false);
-    root->addWidget(voipTree, 1);
-
-    btnCreateRoom = new QPushButton("Create Room");
-    btnCreateRoom->setObjectName("voipBtn");
-    root->addWidget(btnCreateRoom);
-
-    auto *controls = new QFrame;
-    controls->setObjectName("voipControls");
-
-    auto *h = new QHBoxLayout(controls);
-    h->setContentsMargins(0, 0, 0, 0);
-
-    btnMuteMic = new QPushButton(u8"\U0001F3A4");
-    btnMuteMic->setCheckable(true);
-
-    btnDeafen = new QPushButton(u8"\U0001F3A7");
-    btnDeafen->setCheckable(true);
-
-    btnLeave = new QPushButton("Leave");
-
-    for (auto *b : {btnMuteMic, btnDeafen, btnLeave})
-        b->setObjectName("voipBtn");
-
-    h->addWidget(btnMuteMic);
-    h->addWidget(btnDeafen);
-    h->addWidget(btnLeave);
-
-    root->addWidget(controls);
-
-    voipDock->setWidget(panel);
-    addDockWidget(Qt::RightDockWidgetArea, voipDock);
-    voipDock->hide();
-
-    setupVoipConnections();
-}
 
 void MainWindow::setupStatusBar()
 {
@@ -1643,18 +1550,15 @@ QWidget#activityBar {
     background: #333333;
     border-right: 1px solid #252526;
 }
-QToolButton#activityBtn,
-QToolButton#activityBtnVoip {
+QToolButton#activityBtn {
     color: #858585;
     background: transparent;
     border: none;
     border-left: 2px solid transparent;
     font-size: 9px;
 }
-QToolButton#activityBtn:hover,
-QToolButton#activityBtnVoip:hover { color: #cccccc; }
+QToolButton#activityBtn:hover { color: #cccccc; }
 QToolButton#activityBtn:checked   { color: #ffffff; border-left-color: #007acc; }
-QToolButton#activityBtnVoip:checked { color: #ffffff; border-left-color: #007acc; }
 QToolButton#activityBtnProfile {
     color: #858585;
     background: transparent;
@@ -1732,8 +1636,11 @@ QLineEdit#fileSearch {
 
 /* ── Splitter ───────────────────────────────────────────────── */
 QSplitter#centralSplitter::handle {
-    background: #3c3c3c;
-    width: 1px;
+    background: #2d2d2d;
+    width: 4px;
+}
+QSplitter#centralSplitter::handle:hover {
+    background: #007acc;
 }
 
 /* ── Editor Tabs ────────────────────────────────────────────── */
@@ -1757,6 +1664,14 @@ QTabWidget#editorTabs > QTabBar::tab:hover:!selected {
 }
 
 /* ── Bottom Dock ────────────────────────────────────────────── */
+QMainWindow::separator {
+    background: #2d2d2d;
+    width: 4px;
+    height: 4px;
+}
+QMainWindow::separator:hover {
+    background: #007acc;
+}
 QDockWidget#bottomDock  { background: #1e1e1e; color: #cccccc; }
 QTabWidget#bottomTabs::pane  { border: none; background: #1e1e1e; }
 QTabWidget#bottomTabs > QTabBar { background: #252526; }
@@ -1784,9 +1699,7 @@ QPlainTextEdit#terminalPane {
     font-size: 11px;
 }
 
-/* ── VoIP Dock ──────────────────────────────────────────────── */
-QDockWidget#voipDock  { color: #cccccc; }
-QWidget#voipPanel     { background: #252526; }
+/* ── Voice controls (Team panel) ───────────────────────────────── */
 QPushButton#voipBtn {
     background: #3c3c3c;
     color: #cccccc;
@@ -1797,37 +1710,14 @@ QPushButton#voipBtn {
 QPushButton#voipBtn:hover   { background: #505050; }
 QPushButton#voipBtn:pressed { background: #007acc; }
 QPushButton#voipBtn:disabled { color: #555555; }
-QTreeWidget#voipTree {
-    background: #1e1e1e;
-    color: #d4d4d4;
-    border: 1px solid #333;
-}
-QTreeWidget#voipTree::item {
-    padding: 3px 0;
-}
-QTreeWidget#voipTree::item:selected {
-    background: #094771;
-    color: #ffffff;
-}
-QTreeWidget#voipTree::item:hover {
-    background: #2a2d2e;
-}
-
-QFrame#voipControls {
-    background: #2a2a2a;
-    border-top: 1px solid #444;
-}
-
-QPushButton#voipBtn {
-    background: #3c3c3c;
-    border-radius: 6px;
-    padding: 6px;
-}
-QPushButton#voipBtn:checked {
-    background: #007acc;
+QPushButton#voipBtn:checked { background: #007acc; }
+QWidget#callBanner {
+    background: #1e3329;
+    border-bottom: 1px solid #2d5a3d;
 }
 /* ── Shared stub label ──────────────────────────────────────── */
 QLabel#stubLabel { color: #555555; font-size: 11px; }
+QLabel#stubLabel[live="true"] { color: #4ec9b0; font-weight: 600; }
 
 /* ── Search Widget ───────────────────────────────────────── */
 
@@ -2224,7 +2114,7 @@ void MainWindow::toggleSidePanel()
         leftPanel->setVisible(false);
         activeSidePanel = -1;
         btnFiles->setChecked(false);
-        btnTasks->setChecked(false);
+        btnCollab->setChecked(false);
         btnTeam->setChecked(false);
     } else {
         setSidePanelPage(0);
@@ -2234,170 +2124,6 @@ void MainWindow::toggleSidePanel()
 void MainWindow::toggleBottomDock()
 {
     bottomDock->setVisible(!bottomDock->isVisible());
-}
-
-void MainWindow::toggleVoipDock()
-{
-    const bool willShow = !voipDock->isVisible();
-
-    voipDock->setVisible(willShow);
-
-    btnVoip->setChecked(willShow);
-
-    if (willShow) {
-        if (!voiceChat->isConnected())
-            voiceChat->connectToServer("localhost", 9000);
-        else
-            voiceChat->requestRooms();
-    }
-}
-
-void MainWindow::onVoipPeersUpdated(const QStringList &ids)
-{
-    for (int i = 0; i < voipTree->topLevelItemCount(); i++) {
-        auto *roomItem = voipTree->topLevelItem(i);
-        if (roomItem->data(0, Qt::UserRole).toString() != currentVoiceRoom)
-            continue;
-
-        qDeleteAll(roomItem->takeChildren());
-
-        auto *meItem = new QTreeWidgetItem(roomItem);
-        meItem->setText(0, u8"\U0001F464 You");
-        meItem->setForeground(0, QColor("#7fb3d3"));
-        meItem->setData(0, Qt::UserRole, voiceChat->id());
-
-        for (const QString &uid : ids) {
-            auto *userItem = new QTreeWidgetItem(roomItem);
-            const int peerId = uid.toInt();
-            userItem->setText(0, u8"\U0001F464 " + voipNicknames.value(peerId, uid));
-            userItem->setForeground(0, QColor("#aaaaaa"));
-            userItem->setData(0, Qt::UserRole, peerId);
-        }
-
-        roomItem->setExpanded(true);
-        return;
-    }
-}
-
-void MainWindow::setupVoipConnections()
-{
-    connect(btnCreateRoom, &QPushButton::clicked, this, [this]() {
-        QString room = QInputDialog::getText(this, "Create Room", "Room name:");
-        if (room.isEmpty())
-            return;
-
-        addRoom(room);
-        joinRoom(room);
-    });
-
-    connect(voipTree, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item, int) {
-        if (!item->parent())
-            joinRoom(item->data(0, Qt::UserRole).toString());
-    });
-
-    connect(btnMuteMic, &QPushButton::toggled, this, [this](bool on) {
-        micMuted = on;
-        voiceChat->setMicMuted(on);
-    });
-
-    connect(btnDeafen, &QPushButton::toggled, this, [this](bool on) {
-        audioMuted = on;
-        voiceChat->setAudioMuted(on);
-    });
-
-    connect(btnLeave, &QPushButton::clicked, this, [this]() {
-        voiceChat->disconnectFromServer();
-        voipTree->clear();
-        currentVoiceRoom.clear();
-        outputPane->appendPlainText("[VoIP] Left room");
-    });
-
-    connect(voiceChat, &VoiceChat::voipKicked, this, [this]() {
-        voipTree->clear();
-        currentVoiceRoom.clear();
-        voipStatusLabel->setText("Kicked from room");
-        outputPane->appendPlainText("[VoIP] You were kicked from the room");
-    });
-
-    voipTree->setContextMenuPolicy(Qt::CustomContextMenu);
-    connect(voipTree, &QTreeWidget::customContextMenuRequested, this, [this](const QPoint &pos) {
-        QTreeWidgetItem *item = voipTree->itemAt(pos);
-        if (!item || !item->parent())
-            return;
-
-        const int peerId = item->data(0, Qt::UserRole).toInt();
-        if (peerId == voiceChat->id())
-            return;
-
-        QMenu menu(voipTree);
-
-        const bool muted = voiceChat->isPeerMuted(peerId);
-        menu.addAction(muted ? "Unmute" : "Mute for me", [this, peerId, muted]() {
-            voiceChat->setPeerMuted(peerId, !muted);
-            voipStatusLabel->setText(muted ? "Unmuted peer" : "Muted peer locally");
-        });
-
-        menu.addSeparator();
-
-        auto *volWidget = new QWidget;
-        auto *volLayout = new QHBoxLayout(volWidget);
-        volLayout->setContentsMargins(8, 4, 8, 4);
-        volLayout->addWidget(new QLabel("Volume:"));
-        auto *slider = new QSlider(Qt::Horizontal);
-        slider->setRange(0, 200);
-        slider->setValue(qRound(voiceChat->peerVolume(peerId) * 100));
-        slider->setFixedWidth(120);
-        connect(slider, &QSlider::valueChanged, this, [this, peerId](int val) {
-            voiceChat->setPeerVolume(peerId, val / 100.0f);
-        });
-        volLayout->addWidget(slider);
-        auto *volAction = new QWidgetAction(&menu);
-        volAction->setDefaultWidget(volWidget);
-        menu.addAction(volAction);
-
-        menu.addSeparator();
-
-        const QString currentNick = voipNicknames.value(peerId, QString::number(peerId));
-        menu.addAction("Set nickname", [this, peerId, currentNick, item]() {
-            bool ok;
-            const QString nick = QInputDialog::getText(this,
-                                                       "Set Nickname",
-                                                       "Nickname:",
-                                                       QLineEdit::Normal,
-                                                       currentNick,
-                                                       &ok);
-            if (!ok)
-                return;
-            if (nick.isEmpty())
-                voipNicknames.remove(peerId);
-            else
-                voipNicknames[peerId] = nick;
-            item->setText(0, u8"\U0001F464 " + voipNicknames.value(peerId, QString::number(peerId)));
-        });
-
-        menu.addAction("Copy ID",
-                       [peerId]() { QApplication::clipboard()->setText(QString::number(peerId)); });
-
-        if (voiceChat->isHost()) {
-            menu.addSeparator();
-            menu.addAction("Kick from room", [this, peerId]() { voiceChat->kickPeer(peerId); });
-        }
-
-        menu.exec(voipTree->viewport()->mapToGlobal(pos));
-    });
-}
-
-void MainWindow::addRoom(const QString &room)
-{
-    for (int i = 0; i < voipTree->topLevelItemCount(); i++) {
-        if (voipTree->topLevelItem(i)->data(0, Qt::UserRole).toString() == room)
-            return;
-    }
-
-    auto *roomItem = new QTreeWidgetItem(voipTree);
-    roomItem->setText(0, u8"\U0001F50A " + room);
-    roomItem->setData(0, Qt::UserRole, room);
-    roomItem->setExpanded(true);
 }
 
 void MainWindow::onSessionProjectInit(int /*hostSiteId*/, const QStringList &files)
@@ -2444,42 +2170,6 @@ void MainWindow::onSessionFileRenamed(const QString &oldPath, const QString &new
     outputPane->appendPlainText(QString("[Collab] File renamed: %1 → %2").arg(oldPath, newPath));
     if (session && session->role() == CollabSession::Role::Guest)
         fileBrowser->setRemoteFiles(session->fileList());
-}
-
-void MainWindow::joinRoom(const QString &room)
-{
-    if (joiningVoiceRoom)
-        return;
-
-    if (currentVoiceRoom == room && voiceChat->isConnected()) {
-        return;
-    }
-
-    joiningVoiceRoom = true;
-    currentVoiceRoom = room;
-
-    disconnect(voiceChat, &VoiceChat::connectedToServer, this, nullptr);
-
-    connect(
-        voiceChat,
-        &VoiceChat::connectedToServer,
-        this,
-        [this]() {
-            if (!voiceChat->isCallActive()) {
-                voiceChat->startCall();
-            }
-            joiningVoiceRoom = false;
-        },
-        Qt::SingleShotConnection);
-
-    voiceChat->setRoom(room);
-    outputPane->appendPlainText("[VoIP] Joining room: " + room);
-
-    if (voiceChat->isConnected()) {
-        voiceChat->disconnectFromServer();
-    }
-
-    QTimer::singleShot(300, this, [this]() { voiceChat->connectToServer("localhost", 9000); });
 }
 
 bool MainWindow::showStartCollabDialog()
@@ -2720,15 +2410,37 @@ void MainWindow::onSessionAiInsightsReady(const AiInsights &ai)
 void MainWindow::setupAuthManager()
 {
     auth = new AuthManager(this);
-    auth->loadSavedSession();
+    teamsPanel->setAuthManager(auth);
+    teamsPanel->clear();
+    updateCollabAccess();
 
     connect(auth, &AuthManager::sessionRestored, this, [this](const AuthManager::UserInfo &) {
         updateProfileButton();
+        teamsPanel->refresh();
+        updateCollabAccess();
     });
     connect(auth, &AuthManager::loginSuccess, this, [this](const AuthManager::UserInfo &) {
         updateProfileButton();
+        teamsPanel->refresh();
+        updateCollabAccess();
     });
-    connect(auth, &AuthManager::logoutFinished, this, [this] { updateProfileButton(); });
+    connect(auth, &AuthManager::logoutFinished, this, [this] {
+        updateProfileButton();
+        teamsPanel->clear();
+        stopAllCollab();
+        updateCollabAccess();
+    });
+    connect(auth, &AuthManager::profileUpdated, this, [this](const AuthManager::UserInfo &) {
+        updateProfileButton();
+        teamsPanel->refresh();
+        outputPane->appendPlainText("[Auth] Profile updated");
+    });
+    connect(auth, &AuthManager::profileUpdateFailed, this, [this](const QString &err) {
+        outputPane->appendPlainText("[Auth] Failed to update profile: " + err);
+        QMessageBox::warning(this, "Edit Profile", "Failed to update profile: " + err);
+    });
+
+    auth->loadSavedSession();
 }
 
 void MainWindow::updateProfileButton()
@@ -2738,17 +2450,111 @@ void MainWindow::updateProfileButton()
 
     const bool loggedIn = auth && auth->isLoggedIn();
     if (loggedIn) {
-        const QString uname = auth->currentUser().username;
-        const QString letter = uname.isEmpty() ? QStringLiteral("?")
-                                               : QString(uname.at(0).toUpper());
-        btnProfile->setText(letter);
-        btnProfile->setToolTip(uname + "\n\nClick to sign out");
+        const AuthManager::UserInfo user = auth->currentUser();
+        const QString seed = user.email.isEmpty() ? QString::number(user.id) : user.email;
+        const int size = 30;
+
+        btnProfile->setToolButtonStyle(Qt::ToolButtonIconOnly);
+        btnProfile->setIconSize(QSize(size, size));
+        btnProfile->setText(QString());
+
+        const QPixmap fallback = Avatar::letterPixmap(Avatar::initialFor(user.username),
+                                                       Avatar::colorForId(seed),
+                                                       size);
+        Avatar::load(btnProfile, user.avatarUrl, fallback, size, [this](QPixmap pix) {
+            btnProfile->setIcon(QIcon(pix));
+        });
+
+        btnProfile->setToolTip(user.username + "\n\nClick for profile options");
         btnProfile->setProperty("loggedIn", true);
     } else {
+        btnProfile->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        btnProfile->setIcon(QIcon());
         btnProfile->setText("Account");
         btnProfile->setToolTip("Sign in");
         btnProfile->setProperty("loggedIn", false);
     }
     btnProfile->style()->unpolish(btnProfile);
     btnProfile->style()->polish(btnProfile);
+}
+
+void MainWindow::openProfileDialog()
+{
+    if (!auth || !auth->isLoggedIn())
+        return;
+
+    const AuthManager::UserInfo user = auth->currentUser();
+    const int avatarSize = 64;
+
+    QDialog dlg(this);
+    dlg.setWindowTitle("Edit Profile");
+    dlg.setFixedWidth(280);
+
+    auto *vl = new QVBoxLayout(&dlg);
+
+    auto *avatarPreview = new QLabel;
+    avatarPreview->setFixedSize(avatarSize, avatarSize);
+    const QString seed = user.email.isEmpty() ? QString::number(user.id) : user.email;
+    const QPixmap fallback = Avatar::letterPixmap(Avatar::initialFor(user.username),
+                                                   Avatar::colorForId(seed),
+                                                   avatarSize);
+    Avatar::load(avatarPreview, user.avatarUrl, fallback, avatarSize, [avatarPreview](QPixmap pix) {
+        avatarPreview->setPixmap(pix);
+    });
+
+    auto *avatarRow = new QHBoxLayout;
+    avatarRow->addStretch(1);
+    avatarRow->addWidget(avatarPreview);
+    avatarRow->addStretch(1);
+    vl->addLayout(avatarRow);
+
+    auto *btnChoosePhoto = new QPushButton("Choose Photo...");
+    vl->addWidget(btnChoosePhoto);
+
+    QString chosenAvatarPath;
+    connect(btnChoosePhoto, &QPushButton::clicked, &dlg, [&]() {
+        const QString path = QFileDialog::getOpenFileName(&dlg,
+                                                            "Choose Avatar",
+                                                            QString(),
+                                                            "Images (*.png *.jpg *.jpeg)");
+        if (path.isEmpty())
+            return;
+        chosenAvatarPath = path;
+        QPixmap photo;
+        if (photo.load(path))
+            avatarPreview->setPixmap(Avatar::circularPixmap(photo, avatarSize));
+    });
+
+    vl->addWidget(new QLabel("Username:"));
+    auto *nameEdit = new QLineEdit(user.username);
+    vl->addWidget(nameEdit);
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    vl->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+
+    const QString newName = nameEdit->text().trimmed();
+    if (newName == user.username && chosenAvatarPath.isEmpty())
+        return;
+
+    auth->updateProfile(newName, chosenAvatarPath);
+}
+
+void MainWindow::updateCollabAccess()
+{
+    const bool loggedIn = auth && auth->isLoggedIn();
+    const QString tip = loggedIn ? QString() : "Sign in to use collaboration";
+
+    if (btnStartCollab) {
+        btnStartCollab->setEnabled(loggedIn);
+        btnStartCollab->setToolTip(tip);
+    }
+    if (btnJoinCollab) {
+        btnJoinCollab->setEnabled(loggedIn);
+        btnJoinCollab->setToolTip(tip);
+    }
 }

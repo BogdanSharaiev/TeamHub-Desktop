@@ -33,6 +33,7 @@ room_users: dict[str, dict] = {}
 room_host: dict[str, int | None] = {}
 room_mode: dict[str, str] = {}
 room_usernames: dict[str, dict[int, str]] = {}
+room_avatars: dict[str, dict[int, str]] = {}
 project_files: dict[str, list] = {}
 file_snapshots: dict[str, dict] = {}
 file_history: dict[str, dict] = {}
@@ -72,8 +73,13 @@ async def broadcast_all(room: str, payload: dict):
 
 async def broadcast_user_list(room: str):
     names = room_usernames.get(room, {})
+    avatars = room_avatars.get(room, {})
     users = [
-        {"siteId": sid, "username": names.get(sid, f"user_{sid}")}
+        {
+            "siteId": sid,
+            "username": names.get(sid, f"user_{sid}"),
+            "avatarUrl": avatars.get(sid, ""),
+        }
         for sid in room_users.get(room, {}).values()
         if sid is not None
     ]
@@ -399,6 +405,7 @@ async def handle_client(websocket):
     room_host.setdefault(room, None)
     room_mode.setdefault(room, "readwrite")
     room_usernames.setdefault(room, {})
+    room_avatars.setdefault(room, {})
     project_files.setdefault(room, [])
     file_snapshots.setdefault(room, {})
     file_history.setdefault(room, {})
@@ -428,6 +435,7 @@ async def handle_client(websocket):
                     room_user_joins[room][sid] = time.time()
                     uname = payload.get("username", f"user_{sid}")
                     room_usernames[room][sid] = uname
+                    room_avatars[room][sid] = payload.get("avatarUrl", "")
                 if role == "host":
                     room_host[room] = sid
                     files = payload.get("files", [])
@@ -540,7 +548,7 @@ async def handle_client(websocket):
         user_file_state[room].pop(websocket, None)
 
         if not rooms[room]:
-            for d in (room_users, room_host, room_mode, room_usernames,
+            for d in (room_users, room_host, room_mode, room_usernames, room_avatars,
                       project_files, file_snapshots, file_history, cursor_state,
                       user_file_state, room_start_time, room_user_joins,
                       final_file_states):

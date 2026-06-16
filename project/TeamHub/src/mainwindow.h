@@ -10,13 +10,11 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRandomGenerator>
-#include <QSlider>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QTabWidget>
 #include <QToolButton>
 #include <QTreeWidget>
-#include <QWidgetAction>
 
 #include "auth/authmanager.h"
 #include "collab/collabsession.h"
@@ -26,6 +24,7 @@
 #include "editor/codeeditor.h"
 #include "filebrowser/filebrowser.h"
 #include "git/gitpanel.h"
+#include "team/teamspanel.h"
 #include "terminal/terminal.h"
 #include "voicechat/voicechat.h"
 
@@ -36,8 +35,6 @@ class MainWindow : public QMainWindow
 public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow() override;
-    QString currentVoiceRoom;
-    bool joiningVoiceRoom = false;
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -46,16 +43,14 @@ private:
     //Activity Bar
     QWidget *activityBar;
     QToolButton *btnFiles;
-    QToolButton *btnTasks;
+    QToolButton *btnCollab;
     QToolButton *btnTeam;
-    QToolButton *btnVoip;
     //Left Sidebar
     QWidget *leftPanel;
     QLabel *leftTitle;
     QStackedWidget *leftStack;
     FileBrowser *fileBrowser;
-    QListWidget *taskList;
-    QListWidget *teamList;
+    TeamsPanel *teamsPanel;
 
     QSplitter *centralSplitter;
 
@@ -72,7 +67,6 @@ private:
     QWidget *gitPane;
     GitPanel *gitPanel_ = nullptr;
     QWidget *debugPane;
-    QDockWidget *voipDock;
 
     //Status Bar
     QLabel *statusFile;
@@ -96,6 +90,7 @@ private:
     QWidget *collabInSessionPane = nullptr;
     QMap<int, QString> peerFiles;
     QMap<int, QString> peerNames;
+    QMap<int, QString> peerAvatars;
     QString currentCollabFile;
 
     // Session report
@@ -118,19 +113,11 @@ private:
     QToolButton *btnProfile = nullptr;
     void setupAuthManager();
     void updateProfileButton();
+    void openProfileDialog();
+    void updateCollabAccess();
 
     // Voice
     VoiceChat *voiceChat = nullptr;
-    QLabel *voipStatusLabel;
-    QPushButton *voipCallBtn;
-    QTreeWidget *voipTree;
-    QPushButton *btnMuteMic;
-    QPushButton *btnDeafen;
-    QPushButton *btnLeave;
-    QPushButton *btnCreateRoom;
-    bool micMuted = false;
-    bool audioMuted = false;
-    QMap<int, QString> voipNicknames;
 
     //Setup UI
     void setupMenuBar();
@@ -141,8 +128,6 @@ private:
     void setupEditorArea();
     void setupBottomDock();
     void setupDebugPanel();
-    void setupVoipDock();
-    void setupVoipConnections();
     void setupStatusBar();
     void applyTheme();
 
@@ -151,9 +136,6 @@ private:
 
     void clearTabs();
     CodeEditor *createTab(const QString &name);
-
-    void joinRoom(const QString &room);
-    void addRoom(const QString &room);
 
     // Session helpers
     void stopAllCollab();
@@ -167,6 +149,7 @@ private:
     void onCollabUsersUpdated(QMap<int, QString> users);
     void onRemoteFileFocusChanged(int siteId, const QString &file);
     void refreshCollabUsersList();
+    QWidget *makeCollabUserRow(int id, const QString &label, const QString &avatarUrl);
 
 private slots:
     void onActivityButton(int page);
@@ -188,7 +171,6 @@ private slots:
 
     void toggleSidePanel();
     void toggleBottomDock();
-    void toggleVoipDock();
 
     void startCollab(const QString &room,
                      CollabSession::Mode mode = CollabSession::Mode::ReadWrite,
@@ -201,12 +183,6 @@ private slots:
     void onSessionFileCreated(const QString &relPath);
     void onSessionFileDeleted(const QString &relPath);
     void onSessionFileRenamed(const QString &oldPath, const QString &newPath);
-
-    void onVoipCallClicked();
-    void onVoipStatusChanged(const QString &status);
-    void onVoipPeerConnected(const QString &ip, quint16 port);
-    void onVoipPeerDisconnected(const QString &ip, quint16 port);
-    void onVoipPeersUpdated(const QStringList &ids);
 
     void onCollabUserContextMenu(const QPoint &pos);
     void onSessionReportReady(const SessionReportData &report);

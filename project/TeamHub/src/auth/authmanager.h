@@ -23,12 +23,14 @@ public:
     UserInfo currentUser() const { return userData; }
 
     void setBaseUrl(const QString &url) { baseUrl = url; }
+    QString getBaseUrl() const { return baseUrl; }
 
     void login(const QString &email, const QString &password);
     void registerUser(const QString &email,
                       const QString &username,
                       const QString &password,
                       const QString &password2);
+    void updateProfile(const QString &username, const QString &avatarFilePath = QString());
     void logout();
     void loadSavedSession();
 
@@ -37,17 +39,19 @@ signals:
     void loginFailed(const QString &error);
     void registerSuccess(const UserInfo &user);
     void registerFailed(const QString &error);
+    void profileUpdated(const UserInfo &user);
+    void profileUpdateFailed(const QString &error);
     void logoutFinished();
     void sessionRestored(const UserInfo &user);
 
 private:
     QNetworkAccessManager *nam;
-    QString baseUrl = "http://localhost:8000";
+    QString baseUrl;
     QString authToken;
     UserInfo userData;
 
     QNetworkRequest makeRequest(const QString &path) const;
-    static UserInfo parseUser(const QJsonObject &obj);
+    UserInfo parseUser(const QJsonObject &obj) const;
     void saveSession();
     void clearSession();
 };

@@ -347,11 +347,14 @@ void CollabSession::handleMessage(const QJsonObject &obj)
 
     if (type == "user_list") {
         QMap<int, QString> users;
+        QMap<int, QString> avatars;
         for (const QJsonValue &v : obj["users"].toArray()) {
             const QJsonObject u = v.toObject();
             const int sid = u["siteId"].toInt();
             users[sid] = u["username"].toString();
+            avatars[sid] = u["avatarUrl"].toString();
         }
+        peerAvatars = avatars;
         emit usersUpdated(users);
         return;
     }
@@ -551,6 +554,7 @@ void CollabSession::sendRegister()
     msg["type"] = "register";
     msg["siteId"] = currentSiteId;
     msg["username"] = username.isEmpty() ? QString("user_%1").arg(currentSiteId) : username;
+    msg["avatarUrl"] = avatarUrl;
     msg["role"] = (currentRole == Role::Host) ? "host" : "guest";
 
     if (currentRole == Role::Host) {

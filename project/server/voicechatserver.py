@@ -1,10 +1,64 @@
 import asyncio
 import json
+import os
+import time
+import urllib.error
+import urllib.request
+
 import websockets
 
 rooms = {}
 clients = {}
 room_host: dict[str, int] = {}
+
+_env: dict[str, str] = {}
+_env_path = os.path.join(os.path.dirname(__file__), ".env")
+if os.path.exists(_env_path):
+    with open(_env_path, encoding="utf-8") as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _, _v = _line.partition("=")
+                _env[_k.strip()] = _v.strip().strip('"').strip("'")
+
+DJANGO_BASE_URL: str = _env.get("DJANGO_BASE_URL", "http://localhost:8000").rstrip("/")
+VOICE_AUTH_ENABLED: bool = _env.get("VOICE_AUTH_ENABLED", "true").lower() == "true"
+VERIFY_CACHE_TTL = 60
+
+_verify_cache: dict[tuple[str, str, str], tuple[float, bool]] = {}
+
+
+def _check_room_access(token: str, team_id: str, room_id: str) -> bool:
+    url = f"{DJANGO_BASE_URL}/api/teams/{team_id}/rooms/{room_id}/"
+    req = urllib.request.Request(url, headers={"Authorization": f"Token {token}"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return resp.status == 200
+    except urllib.error.HTTPError:
+        return False
+    except urllib.error.URLError:
+        return False
+
+
+async def verify_room_access(token: str, team_id: str, room_id: str) -> bool:
+    if not VOICE_AUTH_ENABLED:
+        return True
+    if not token or not team_id or not room_id:
+        return False
+
+    cache_key = (token, team_id, room_id)
+    now = time.monotonic()
+    cached = _verify_cache.get(cache_key)
+    if cached is not None and now - cached[0] < VERIFY_CACHE_TTL:
+        return cached[1]
+
+    if len(_verify_cache) > 1000:
+        _verify_cache.clear()
+
+    loop = asyncio.get_running_loop()
+    ok = await loop.run_in_executor(None, _check_room_access, token, team_id, room_id)
+    _verify_cache[cache_key] = (now, ok)
+    return ok
 
 
 async def broadcast_room(room):
@@ -23,29 +77,6 @@ async def broadcast_room(room):
                 await ws.send(msg)
             except:
                 pass
-
-
-def _build_rooms_payload():
-    room_info = {}
-    for room_name, room_data in rooms.items():
-        room_info[room_name] = [str(p["id"]) for p in room_data.get("peers", [])]
-    return json.dumps({"type": "rooms_list", "rooms": room_info})
-
-
-async def send_rooms_list(websocket):
-    try:
-        await websocket.send(_build_rooms_payload())
-    except:
-        pass
-
-
-async def broadcast_rooms_list_all():
-    msg = _build_rooms_payload()
-    for ws in list(clients.keys()):
-        try:
-            await ws.send(msg)
-        except:
-            pass
 
 
 async def relay_audio(room, sender_ws, data):
@@ -71,18 +102,28 @@ async def handle_client(websocket):
             data = json.loads(message)
             msg_type = data.get("type")
 
-            if msg_type == "get_rooms":
-                await send_rooms_list(websocket)
-                continue
-
             if msg_type in ["register", "join"]:
                 room = data.get("room", "default")
+                token = data.get("token", "")
+                team_id = data.get("team_id", "")
+
+                if not await verify_room_access(token, team_id, room):
+                    try:
+                        await websocket.send(json.dumps({
+                            "type": "register_denied",
+                            "reason": "Not authorized for this voice room.",
+                        }))
+                        await websocket.close(4001, "unauthorized")
+                    except:
+                        pass
+                    continue
 
                 peer = {
                     "ip": data["ip"],
                     "port": data["port"],
                     "id": data["id"],
                     "mode": data.get("mode", "hybrid"),
+                    "username": data.get("username", ""),
                 }
 
                 clients[websocket] = {
@@ -91,6 +132,7 @@ async def handle_client(websocket):
                     "ip": data["ip"],
                     "port": data["port"],
                     "mode": data.get("mode", "hybrid"),
+                    "username": data.get("username", ""),
                 }
 
                 if room not in rooms:
@@ -104,7 +146,6 @@ async def handle_client(websocket):
                 rooms[room]["peers"].append(peer)
 
                 await broadcast_room(room)
-                await broadcast_rooms_list_all()
                 continue
 
             if msg_type == "voip_kick":
@@ -150,11 +191,14 @@ async def handle_client(websocket):
                         room_host.pop(room, None)
 
                 await broadcast_room(room)
-                await broadcast_rooms_list_all()
 
 
 async def main():
     print("Unified VoIP server ws://0.0.0.0:9000")
+    if VOICE_AUTH_ENABLED:
+        print(f"[Auth] Verifying rooms against {DJANGO_BASE_URL}")
+    else:
+        print("[Auth] VOICE_AUTH_ENABLED=false — rooms are NOT verified against Django")
     async with websockets.serve(handle_client, "0.0.0.0", 9000):
         await asyncio.Future()
 

@@ -99,12 +99,37 @@ void CodeEditor::setupFonts()
     QFont regular("Consolas", 11);
     regular.setFixedPitch(true);
     regular.setStyleHint(QFont::Monospace);
+    regular.setBold(false);
 
     QFont italic = regular;
     italic.setItalic(true);
 
+    setFont(regular);
     lexer->setDefaultFont(regular);
-    for (int s = 0; s <= QsciLexerPython::Inconsistent; ++s)
+
+    static const int allStyles[] = {
+        QsciLexerPython::Default,
+        QsciLexerPython::Comment,
+        QsciLexerPython::Number,
+        QsciLexerPython::DoubleQuotedString,
+        QsciLexerPython::SingleQuotedString,
+        QsciLexerPython::Keyword,
+        QsciLexerPython::TripleSingleQuotedString,
+        QsciLexerPython::TripleDoubleQuotedString,
+        QsciLexerPython::ClassName,
+        QsciLexerPython::FunctionMethodName,
+        QsciLexerPython::Operator,
+        QsciLexerPython::Identifier,
+        QsciLexerPython::CommentBlock,
+        QsciLexerPython::UnclosedString,
+        QsciLexerPython::HighlightedIdentifier,
+        QsciLexerPython::Decorator,
+        QsciLexerPython::DoubleQuotedFString,
+        QsciLexerPython::SingleQuotedFString,
+        QsciLexerPython::TripleSingleQuotedFString,
+        QsciLexerPython::TripleDoubleQuotedFString,
+    };
+    for (int s : allStyles)
         lexer->setFont(regular, s);
 
     lexer->setFont(italic, QsciLexerPython::Comment);
@@ -691,7 +716,29 @@ void CodeEditor::applyDarkTheme()
 
     lexer->setDefaultPaper(bg);
     lexer->setDefaultColor(fg);
-    for (int s = 0; s <= QsciLexerPython::Inconsistent; ++s)
+    static const int allStyles[] = {
+        QsciLexerPython::Default,
+        QsciLexerPython::Comment,
+        QsciLexerPython::Number,
+        QsciLexerPython::DoubleQuotedString,
+        QsciLexerPython::SingleQuotedString,
+        QsciLexerPython::Keyword,
+        QsciLexerPython::TripleSingleQuotedString,
+        QsciLexerPython::TripleDoubleQuotedString,
+        QsciLexerPython::ClassName,
+        QsciLexerPython::FunctionMethodName,
+        QsciLexerPython::Operator,
+        QsciLexerPython::Identifier,
+        QsciLexerPython::CommentBlock,
+        QsciLexerPython::UnclosedString,
+        QsciLexerPython::HighlightedIdentifier,
+        QsciLexerPython::Decorator,
+        QsciLexerPython::DoubleQuotedFString,
+        QsciLexerPython::SingleQuotedFString,
+        QsciLexerPython::TripleSingleQuotedFString,
+        QsciLexerPython::TripleDoubleQuotedFString,
+    };
+    for (int s : allStyles)
         lexer->setPaper(bg, s);
 
     lexer->setColor(fg, QsciLexerPython::Default);
@@ -701,6 +748,10 @@ void CodeEditor::applyDarkTheme()
     lexer->setColor(QColor("#ce9178"), QsciLexerPython::TripleSingleQuotedString);
     lexer->setColor(QColor("#ce9178"), QsciLexerPython::TripleDoubleQuotedString);
     lexer->setColor(QColor("#ce9178"), QsciLexerPython::UnclosedString);
+    lexer->setColor(QColor("#ce9178"), QsciLexerPython::SingleQuotedFString);
+    lexer->setColor(QColor("#ce9178"), QsciLexerPython::DoubleQuotedFString);
+    lexer->setColor(QColor("#ce9178"), QsciLexerPython::TripleSingleQuotedFString);
+    lexer->setColor(QColor("#ce9178"), QsciLexerPython::TripleDoubleQuotedFString);
     lexer->setColor(QColor("#6a9955"), QsciLexerPython::Comment);
     lexer->setColor(QColor("#6a9955"), QsciLexerPython::CommentBlock);
     lexer->setColor(QColor("#b5cea8"), QsciLexerPython::Number);
@@ -736,7 +787,29 @@ void CodeEditor::applyLightTheme()
 
     lexer->setDefaultPaper(bg);
     lexer->setDefaultColor(fg);
-    for (int s = 0; s <= QsciLexerPython::Inconsistent; ++s)
+    static const int allStyles[] = {
+        QsciLexerPython::Default,
+        QsciLexerPython::Comment,
+        QsciLexerPython::Number,
+        QsciLexerPython::DoubleQuotedString,
+        QsciLexerPython::SingleQuotedString,
+        QsciLexerPython::Keyword,
+        QsciLexerPython::TripleSingleQuotedString,
+        QsciLexerPython::TripleDoubleQuotedString,
+        QsciLexerPython::ClassName,
+        QsciLexerPython::FunctionMethodName,
+        QsciLexerPython::Operator,
+        QsciLexerPython::Identifier,
+        QsciLexerPython::CommentBlock,
+        QsciLexerPython::UnclosedString,
+        QsciLexerPython::HighlightedIdentifier,
+        QsciLexerPython::Decorator,
+        QsciLexerPython::DoubleQuotedFString,
+        QsciLexerPython::SingleQuotedFString,
+        QsciLexerPython::TripleSingleQuotedFString,
+        QsciLexerPython::TripleDoubleQuotedFString,
+    };
+    for (int s : allStyles)
         lexer->setPaper(bg, s);
 
     lexer->setColor(fg, QsciLexerPython::Default);
@@ -746,6 +819,10 @@ void CodeEditor::applyLightTheme()
     lexer->setColor(QColor("#a31515"), QsciLexerPython::TripleSingleQuotedString);
     lexer->setColor(QColor("#a31515"), QsciLexerPython::TripleDoubleQuotedString);
     lexer->setColor(QColor("#a31515"), QsciLexerPython::UnclosedString);
+    lexer->setColor(QColor("#a31515"), QsciLexerPython::SingleQuotedFString);
+    lexer->setColor(QColor("#a31515"), QsciLexerPython::DoubleQuotedFString);
+    lexer->setColor(QColor("#a31515"), QsciLexerPython::TripleSingleQuotedFString);
+    lexer->setColor(QColor("#a31515"), QsciLexerPython::TripleDoubleQuotedFString);
     lexer->setColor(QColor("#008000"), QsciLexerPython::Comment);
     lexer->setColor(QColor("#008000"), QsciLexerPython::CommentBlock);
     lexer->setColor(QColor("#098658"), QsciLexerPython::Number);

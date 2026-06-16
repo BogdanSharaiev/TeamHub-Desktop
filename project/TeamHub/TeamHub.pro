@@ -12,13 +12,18 @@ win32 {
     QMAKE_POST_LINK += $$QMAKE_COPY \
         $$shell_path($$PWD/libs/libgit2.dll) \
         $$shell_path($$OUT_PWD/) $$escape_expand(\\n\\t)
+    QMAKE_POST_LINK += $$QMAKE_COPY \
+        $$shell_path($$PWD/.env) \
+        $$shell_path($$OUT_PWD/) $$escape_expand(\\n\\t)
 }
 
 SOURCES += \
     src/auth/authmanager.cpp \
     src/auth/authdialog.cpp \
+    src/avatar/avatar.cpp \
     src/collab/collabsession.cpp \
     src/collab/sessionreportdialog.cpp \
+    src/config/appconfig.cpp \
     src/debug/debugadapter.cpp \
     src/editor/codeeditor.cpp \
     src/editor/textsearch.cpp \
@@ -29,15 +34,19 @@ SOURCES += \
     src/mainwindow.cpp \
     src/rga/rgamanager.cpp \
     src/rga/rgaseq.cpp \
+    src/team/teammanager.cpp \
+    src/team/teamspanel.cpp \
     src/terminal/terminal.cpp \
     src/voicechat/voicechat.cpp
 
 HEADERS += \
     src/auth/authmanager.h \
     src/auth/authdialog.h \
+    src/avatar/avatar.h \
     src/collab/collabsession.h \
     src/collab/sessionreport.h \
     src/collab/sessionreportdialog.h \
+    src/config/appconfig.h \
     src/debug/debugadapter.h \
     src/editor/codeeditor.h \
     src/editor/textsearch.h \
@@ -48,6 +57,8 @@ HEADERS += \
     src/rga/rganode.h \
     src/rga/rgamanager.h \
     src/rga/rgaseq.h \
+    src/team/teammanager.h \
+    src/team/teamspanel.h \
     src/terminal/terminal.h \
     src/voicechat/voicechat.h
 

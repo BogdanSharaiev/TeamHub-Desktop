@@ -1,5 +1,11 @@
 #include "authmanager.h"
 
+#include "../avatar/avatar.h"
+#include "../config/appconfig.h"
+
+#include <QFile>
+#include <QFileInfo>
+#include <QHttpMultiPart>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -10,6 +16,7 @@
 AuthManager::AuthManager(QObject *parent)
     : QObject(parent)
     , nam(new QNetworkAccessManager(this))
+    , baseUrl(AppConfig::djangoBaseUrl())
 {}
 
 void AuthManager::loadSavedSession()
@@ -19,7 +26,7 @@ void AuthManager::loadSavedSession()
     userData.id = s.value("auth/userId").toInt();
     userData.email = s.value("auth/email").toString();
     userData.username = s.value("auth/username").toString();
-    userData.avatarUrl = s.value("auth/avatarUrl").toString();
+    userData.avatarUrl = Avatar::resolveUrl(baseUrl, s.value("auth/avatarUrl").toString());
 
     if (!authToken.isEmpty())
         emit sessionRestored(userData);
@@ -97,6 +104,61 @@ void AuthManager::registerUser(const QString &email,
     });
 }
 
+void AuthManager::updateProfile(const QString &username, const QString &avatarFilePath)
+{
+    if (!isLoggedIn())
+        return;
+
+    auto *multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
+
+    if (!username.isEmpty()) {
+        QHttpPart usernamePart;
+        usernamePart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                                QVariant("form-data; name=\"username\""));
+        usernamePart.setBody(username.toUtf8());
+        multiPart->append(usernamePart);
+    }
+
+    if (!avatarFilePath.isEmpty()) {
+        auto *file = new QFile(avatarFilePath, multiPart);
+        if (file->open(QIODevice::ReadOnly)) {
+            QHttpPart avatarPart;
+            avatarPart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                                  QVariant(QString("form-data; name=\"avatar\"; filename=\"%1\"")
+                                               .arg(QFileInfo(avatarFilePath).fileName())));
+            avatarPart.setBodyDevice(file);
+            multiPart->append(avatarPart);
+        }
+    }
+
+    QNetworkRequest req(QUrl(baseUrl + "/api/auth/profile/"));
+    req.setRawHeader("Authorization", ("Token " + authToken).toUtf8());
+
+    auto *reply = nam->sendCustomRequest(req, "PATCH", multiPart);
+    multiPart->setParent(reply);
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+        reply->deleteLater();
+        const QByteArray data = reply->readAll();
+        const QJsonObject root = QJsonDocument::fromJson(data).object();
+
+        if (reply->error() != QNetworkReply::NoError) {
+            QStringList msgs;
+            for (auto it = root.begin(); it != root.end(); ++it) {
+                const QJsonArray arr = it.value().toArray();
+                if (!arr.isEmpty())
+                    msgs << arr[0].toString();
+            }
+            emit profileUpdateFailed(msgs.isEmpty() ? reply->errorString() : msgs.join("\n"));
+            return;
+        }
+
+        userData = parseUser(root);
+        saveSession();
+        emit profileUpdated(userData);
+    });
+}
+
 void AuthManager::logout()
 {
     if (!isLoggedIn()) {
@@ -113,13 +175,13 @@ void AuthManager::logout()
     });
 }
 
-AuthManager::UserInfo AuthManager::parseUser(const QJsonObject &obj)
+AuthManager::UserInfo AuthManager::parseUser(const QJsonObject &obj) const
 {
     UserInfo u;
     u.id = obj["id"].toInt();
     u.email = obj["email"].toString();
     u.username = obj["username"].toString();
-    u.avatarUrl = obj["avatar_url"].toString();
+    u.avatarUrl = Avatar::resolveUrl(baseUrl, obj["avatar_url"].toString());
     return u;
 }
 

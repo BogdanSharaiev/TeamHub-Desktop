@@ -337,21 +337,7 @@ void VoiceChat::onWebSocketConnected()
 
     registerWithServer();
 
-    QJsonObject req;
-    req["type"] = "get_rooms";
-
-    webSocket->sendTextMessage(QJsonDocument(req).toJson(QJsonDocument::Compact));
-
     emit connectedToServer();
-}
-
-void VoiceChat::requestRooms()
-{
-    if (webSocket->state() != QAbstractSocket::ConnectedState)
-        return;
-    QJsonObject req;
-    req["type"] = "get_rooms";
-    webSocket->sendTextMessage(QJsonDocument(req).toJson(QJsonDocument::Compact));
 }
 
 void VoiceChat::setPeerMuted(int peerId, bool muted)
@@ -441,17 +427,11 @@ void VoiceChat::onWebSocketTextMessageReceived(const QString &message)
         return;
     }
 
-    if (type == "rooms_list") {
-        QJsonObject roomsObj = obj.value("rooms").toObject();
-        QMap<QString, QStringList> roomUsers;
-        for (auto it = roomsObj.begin(); it != roomsObj.end(); ++it) {
-            QStringList users;
-            for (const QJsonValue &v : it.value().toArray())
-                users << v.toString();
-            roomUsers[it.key()] = users;
-        }
-        emit statusChanged(QString("Rooms received: %1").arg(roomUsers.size()));
-        emit roomsUpdated(roomUsers);
+    if (type == "register_denied") {
+        const QString reason = obj.value("reason").toString("Access denied.");
+        emit registrationDenied(reason);
+        emit statusChanged(reason);
+        disconnectFromServer();
         return;
     }
 }
@@ -467,8 +447,19 @@ void VoiceChat::registerWithServer()
 
     msg["room"] = room;
     msg["mode"] = mode;
+    msg["token"] = authToken;
+    msg["team_id"] = teamId;
+    msg["username"] = username;
 
     webSocket->sendTextMessage(QJsonDocument(msg).toJson(QJsonDocument::Compact));
+}
+
+QString VoiceChat::peerName(int peerId) const
+{
+    for (const PeerInfo &p : peers)
+        if (p.id == peerId)
+            return p.name;
+    return QString();
 }
 
 void VoiceChat::updatePeerList(const QJsonArray &peerArray)
@@ -478,6 +469,7 @@ void VoiceChat::updatePeerList(const QJsonArray &peerArray)
         QString ip;
         quint16 port;
         int id;
+        QString name;
     };
 
     QList<Entry> incoming;
@@ -485,7 +477,10 @@ void VoiceChat::updatePeerList(const QJsonArray &peerArray)
     for (const QJsonValue &v : peerArray) {
         QJsonObject o = v.toObject();
 
-        Entry e{o.value("ip").toString(), quint16(o.value("port").toInt()), o.value("id").toInt()};
+        Entry e{o.value("ip").toString(),
+                quint16(o.value("port").toInt()),
+                o.value("id").toInt(),
+                o.value("username").toString()};
 
         if (e.id == publicId)
             continue;
@@ -515,9 +510,10 @@ void VoiceChat::updatePeerList(const QJsonArray &peerArray)
     for (const Entry &e : incoming) {
         bool already = false;
 
-        for (const PeerInfo &p : std::as_const(peers)) {
+        for (PeerInfo &p : peers) {
             if (p.id == e.id) {
                 already = true;
+                p.name = e.name;
                 break;
             }
         }
@@ -527,6 +523,7 @@ void VoiceChat::updatePeerList(const QJsonArray &peerArray)
             peer.ip = e.ip;
             peer.port = e.port;
             peer.id = e.id;
+            peer.name = e.name;
 
             peers.append(peer);
 

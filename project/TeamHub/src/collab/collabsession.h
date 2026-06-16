@@ -24,6 +24,7 @@ public:
 
     explicit CollabSession(int siteId, Role role, QObject *parent = nullptr);
     void setUsername(const QString &name) { username = name; }
+    void setAvatarUrl(const QString &url) { avatarUrl = url; }
     ~CollabSession() override;
 
     void connectToServer(const QString &url);
@@ -57,6 +58,7 @@ public:
     bool hasTextCache(const QString &relPath) const { return textCache.contains(relPath); }
     QString cachedText(const QString &relPath) const { return textCache.value(relPath); }
     QMap<int, int> fileCursors(const QString &relPath) const { return cursorCache.value(relPath); }
+    QMap<int, QString> avatars() const { return peerAvatars; }
 
 signals:
     void connected();
@@ -111,8 +113,10 @@ private:
     Role currentRole;
     Mode mode = Mode::ReadWrite;
     QString username;
+    QString avatarUrl;
     QString rootPath;
     QStringList files;
+    QMap<int, QString> peerAvatars;
 
     QMap<QString, RGAManager *> active;
     QMap<QString, FileState> fileStates;
