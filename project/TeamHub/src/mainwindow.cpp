@@ -1,8 +1,11 @@
-#include "mainwindow.h"
+﻿#include "mainwindow.h"
 
 #include "auth/authdialog.h"
 #include "avatar/avatar.h"
 #include "config/appconfig.h"
+#include "db/projectdb.h"
+#include "settings/settingsdialog.h"
+#include "settings/settingsmanager.h"
 
 #include <QApplication>
 #include <QButtonGroup>
@@ -36,6 +39,16 @@
 #include <QVBoxLayout>
 #include <functional>
 
+static QString loadStyle(const QString &name)
+{
+    QFile f(QCoreApplication::applicationDirPath() + "/styles/" + name);
+    if (!f.open(QIODevice::ReadOnly))
+        f.setFileName(QString(TEAMHUB_STYLES_DIR) + name);
+    if (f.isOpen() || f.open(QIODevice::ReadOnly))
+        return QString::fromUtf8(f.readAll());
+    return {};
+}
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , activeSidePanel(0)
@@ -43,6 +56,9 @@ MainWindow::MainWindow(QWidget *parent)
     setWindowTitle("TeamHub");
     resize(1400, 900);
     setMinimumSize(800, 500);
+
+    SettingsManager::instance().load();
+    ProjectDB::instance().open();
 
     voiceChat = new VoiceChat(this);
 
@@ -68,6 +84,19 @@ MainWindow::MainWindow(QWidget *parent)
     outputPane->appendPlainText("[TeamHub] Ready.");
     updateWindowTitle();
     setupAuthManager();
+
+    const QString last = SettingsManager::instance().lastProjectPath();
+    if (!last.isEmpty()) {
+        if (QFileInfo::exists(last))
+            openProjectFolder(last);
+        else {
+            SettingsManager::instance().setLastProjectPath("");
+            SettingsManager::instance().save();
+            ProjectDB::instance().removeProject(last);
+        }
+    }
+
+    applySettings();
 }
 
 MainWindow::~MainWindow() = default;
@@ -92,6 +121,9 @@ void MainWindow::closeEvent(QCloseEvent *event)
             return;
         }
     }
+    saveSessionToDb();
+    SettingsManager::instance().setLastProjectPath(currentProjectPath);
+    SettingsManager::instance().save();
     event->accept();
 }
 
@@ -109,29 +141,37 @@ CodeEditor *MainWindow::createTab(const QString &name)
 void MainWindow::setupMenuBar()
 {
     QMenu *fileMenu = menuBar()->addMenu("&File");
-    fileMenu->addAction("&New File", this, &MainWindow::newFile, QKeySequence::New);
-    fileMenu->addAction("&Open Folder", this, &MainWindow::openFolder);
-    fileMenu->addAction("&Open File...", this, &MainWindow::openFile, QKeySequence::Open);
-    fileMenu->addAction("&Save", this, [this] { saveFile(); }, QKeySequence::Save);
-    fileMenu->addAction("Save &As...", this, [this] { saveFileAs(); }, QKeySequence::SaveAs);
+    fileMenu->addAction("&New File", QKeySequence::New, this, &MainWindow::newFile);
+    fileMenu->addAction("&Open Folder", {}, this, &MainWindow::openFolder);
+    fileMenu->addAction("&Open File...", QKeySequence::Open, this, &MainWindow::openFile);
+    fileMenu->addAction("&Save", QKeySequence::Save, this, [this] { saveFile(); });
+    fileMenu->addAction("Save &As...", QKeySequence::SaveAs, this, [this] { saveFileAs(); });
     fileMenu->addSeparator();
-    fileMenu->addAction(
-        "Close &Tab",
-        this,
-        [this] { onTabCloseRequested(editorTabs->currentIndex()); },
-        QKeySequence("Ctrl+W"));
+    fileMenu->addAction("Close &Tab", QKeySequence("Ctrl+W"), this, [this] {
+        onTabCloseRequested(editorTabs->currentIndex());
+    });
     fileMenu->addSeparator();
-    fileMenu->addAction("E&xit", qApp, &QApplication::quit, QKeySequence::Quit);
+
+    QMenu *recentMenu = fileMenu->addMenu("Recent &Projects");
+    connect(recentMenu, &QMenu::aboutToShow, this, [this, recentMenu] {
+        refreshRecentMenu(recentMenu);
+    });
+
+    fileMenu->addSeparator();
+    fileMenu->addAction("&Settings...", QKeySequence("Ctrl+,"), this, &MainWindow::openSettings);
+    fileMenu->addSeparator();
+    fileMenu->addAction("E&xit", QKeySequence::Quit, qApp, &QApplication::quit);
 
     QMenu *editMenu = menuBar()->addMenu("&Edit");
-    editMenu->addAction("&Undo", this, [this] { editor->undo(); }, QKeySequence::Undo);
-    editMenu->addAction("&Redo", this, [this] { editor->redo(); }, QKeySequence::Redo);
+    editMenu->addAction("&Undo", QKeySequence::Undo, this, [this] { editor->undo(); });
+    editMenu->addAction("&Redo", QKeySequence::Redo, this, [this] { editor->redo(); });
     editMenu->addSeparator();
-    editMenu->addAction("Cu&t", this, [this] { editor->cut(); }, QKeySequence::Cut);
-    editMenu->addAction("&Copy", this, [this] { editor->copy(); }, QKeySequence::Copy);
-    editMenu->addAction("&Paste", this, [this] { editor->paste(); }, QKeySequence::Paste);
-    editMenu
-        ->addAction("Select &All", this, [this] { editor->selectAll(); }, QKeySequence::SelectAll);
+    editMenu->addAction("Cu&t", QKeySequence::Cut, this, [this] { editor->cut(); });
+    editMenu->addAction("&Copy", QKeySequence::Copy, this, [this] { editor->copy(); });
+    editMenu->addAction("&Paste", QKeySequence::Paste, this, [this] { editor->paste(); });
+    editMenu->addAction("Select &All", QKeySequence::SelectAll, this, [this] {
+        editor->selectAll();
+    });
     editMenu->addSeparator();
     auto *actFind = editMenu->addAction("&Find / Replace...", QKeySequence("Ctrl+F"));
     connect(actFind, &QAction::triggered, this, [this]() {
@@ -144,18 +184,20 @@ void MainWindow::setupMenuBar()
 
     QMenu *viewMenu = menuBar()->addMenu("&View");
     viewMenu->addAction("Toggle &Side Panel",
+                        QKeySequence("Ctrl+B"),
                         this,
-                        &MainWindow::toggleSidePanel,
-                        QKeySequence("Ctrl+B"));
+                        &MainWindow::toggleSidePanel);
     viewMenu->addAction("Toggle &Output Panel",
+                        QKeySequence("Ctrl+J"),
                         this,
-                        &MainWindow::toggleBottomDock,
-                        QKeySequence("Ctrl+J"));
-    viewMenu->addAction("Toggle &Team Panel", this, [this] { onActivityButton(2); });
+                        &MainWindow::toggleBottomDock);
+    viewMenu->addAction("Toggle &Team Panel", {}, this, [this] { onActivityButton(2); });
     viewMenu->addSeparator();
-    viewMenu->addAction("Zoom &In", this, [this] { editor->zoomIn(); }, QKeySequence::ZoomIn);
-    viewMenu->addAction("Zoom &Out", this, [this] { editor->zoomOut(); }, QKeySequence::ZoomOut);
-    viewMenu->addAction("Reset &Zoom", this, [this] { editor->resetZoom(); }, QKeySequence("Ctrl+0"));
+    viewMenu->addAction("Zoom &In", QKeySequence::ZoomIn, this, [this] { editor->zoomIn(); });
+    viewMenu->addAction("Zoom &Out", QKeySequence::ZoomOut, this, [this] { editor->zoomOut(); });
+    viewMenu->addAction("Reset &Zoom", QKeySequence("Ctrl+0"), this, [this] {
+        editor->resetZoom();
+    });
     viewMenu->addSeparator();
     QMenu *themeMenu = viewMenu->addMenu("&Theme");
     themeMenu->addAction("Dark", this, [this] { editor->setTheme(CodeEditor::Theme::Dark); });
@@ -900,7 +942,6 @@ void MainWindow::setupLeftPanel()
     leftStack = new QStackedWidget;
 
     fileBrowser = new FileBrowser(this);
-    fileBrowser->setRootPath("C:/TeamHub-Desktop/project/TeamHub");
     leftStack->addWidget(fileBrowser);
 
     teamsPanel = new TeamsPanel;
@@ -1103,30 +1144,11 @@ void MainWindow::setupDebugPanel()
 
     auto *dbgBar = new QToolBar;
     dbgBar->setMovable(false);
-    dbgBar->setStyleSheet(R"(
-        QToolBar {
-            background: #252526;
-            border: none;
-            spacing: 3px;
-            padding: 3px 6px;
-        }
-        QToolButton {
-            background: #3a3d41;
-            color: #d4d4d4;
-            border: 1px solid #555558;
-            border-radius: 4px;
-            padding: 4px 11px;
-            font-size: 12px;
-        }
-        QToolButton:hover {
-            background: #4a4d51;
-            border-color: #569cd6;
-            color: #ffffff;
-        }
-        QToolButton:pressed { background: #2a2d31; }
-        QToolButton:disabled { color: #555558; background: #2d2d2d; border-color: #3a3a3a; }
-        QToolBar::separator { background: #555558; width: 1px; margin: 4px 3px; }
-    )");
+    {
+        const QString s = loadStyle("debugbar.qss");
+        if (!s.isEmpty())
+            dbgBar->setStyleSheet(s);
+    }
 
     actDebugContinue = dbgBar->addAction(u8"▶  Continue", this, [this] {
         if (debugAdapter)
@@ -1440,7 +1462,6 @@ void MainWindow::openDiffTab(const QString &relPath, bool staged)
     editorTabs->setCurrentIndex(idx);
 }
 
-
 void MainWindow::setupStatusBar()
 {
     statusFile = new QLabel("Untitled");
@@ -1498,335 +1519,9 @@ void MainWindow::onTabChanged(int index)
 
 void MainWindow::applyTheme()
 {
-    setStyleSheet(R"(
-/* ── Main window ────────────────────────────────────────────── */
-QMainWindow { background: #1e1e1e; }
-
-/* ── Menu bar ───────────────────────────────────────────────── */
-QMenuBar {
-    background: #3c3c3c;
-    color: #cccccc;
-    border-bottom: 1px solid #252526;
-}
-QMenuBar::item:selected { background: #505050; }
-QMenu {
-    background: #252526;
-    color: #cccccc;
-    border: 1px solid #454545;
-}
-QMenu::item:selected    { background: #094771; }
-QMenu::item:disabled    { color: #555555; }
-QMenu::separator {
-    height: 1px;
-    background: #454545;
-    margin: 2px 0;
-}
-
-/* ── Toolbar ────────────────────────────────────────────────── */
-QToolBar#mainToolBar {
-    background: #3c3c3c;
-    border-bottom: 1px solid #252526;
-    spacing: 2px;
-    padding: 2px 4px;
-}
-QToolBar#mainToolBar QToolButton {
-    color: #cccccc;
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 3px;
-    padding: 3px 8px;
-}
-QToolBar#mainToolBar QToolButton:hover   { background: #505050; border-color: #606060; }
-QToolBar#mainToolBar QToolButton:pressed { background: #3a3a3a; }
-QToolBar#mainToolBar QToolButton:disabled{ color: #555555; }
-QToolBar::separator {
-    width: 1px;
-    background: #555555;
-    margin: 4px 4px;
-}
-
-/* ── Activity Bar ───────────────────────────────────────────── */
-QWidget#activityBar {
-    background: #333333;
-    border-right: 1px solid #252526;
-}
-QToolButton#activityBtn {
-    color: #858585;
-    background: transparent;
-    border: none;
-    border-left: 2px solid transparent;
-    font-size: 9px;
-}
-QToolButton#activityBtn:hover { color: #cccccc; }
-QToolButton#activityBtn:checked   { color: #ffffff; border-left-color: #007acc; }
-QToolButton#activityBtnProfile {
-    color: #858585;
-    background: transparent;
-    border: none;
-    border-left: 2px solid transparent;
-    font-size: 9px;
-}
-QToolButton#activityBtnProfile:hover { color: #cccccc; }
-QToolButton#activityBtnProfile[loggedIn="true"] { color: #4ec9b0; }
-
-/* ── Left Panel ─────────────────────────────────────────────── */
-QWidget#leftPanel {
-    background: #252526;
-    border-right: 1px solid #3c3c3c;
-}
-QLabel#panelTitle {
-    color: #bbbbbb;
-    font-size: 10px;
-    font-weight: bold;
-    background: #252526;
-    letter-spacing: 1px;
-}
-QFrame#panelSeparator {
-    color: #3c3c3c;
-    max-height: 1px;
-    background: #3c3c3c;
-}
-QTreeWidget#fileTree {
-    background: #252526;
-    color: #cccccc;
-    border: none;
-    outline: 0;
-}
-QTreeWidget#fileTree::item:hover    { background: #2a2d2e; }
-QTreeWidget#fileTree::item:selected { background: #094771; }
-QListWidget#taskList,
-QListWidget#teamList {
-    background: #252526;
-    color: #cccccc;
-    border: none;
-}
-QListWidget#taskList::item:hover,
-QListWidget#teamList::item:hover    { background: #2a2d2e; }
-QListWidget#taskList::item:selected,
-QListWidget#teamList::item:selected { background: #094771; }
-
-QTreeView#fileBrowserTree {
-    background: #252526;
-    color: #cccccc;
-    border: none;
-    outline: 0;
-}
-QTreeView#fileBrowserTree::item {
-    height: 22px;
-    padding-left: 4px;
-}
-QTreeView#fileBrowserTree::item:hover {
-    background: #2a2d2e;
-}
-QTreeView#fileBrowserTree::item:selected {
-    background: #094771;
-    color: #ffffff;
-}
-QTreeView#fileBrowserTree::branch {
-    background: #252526;
-}
-QLineEdit#fileSearch {
-    background: #3c3c3c;
-    color: #cccccc;
-    border: none;
-    border-bottom: 1px solid #454545;
-    padding: 4px 8px;
-    font-size: 12px;
-}
-
-/* ── Splitter ───────────────────────────────────────────────── */
-QSplitter#centralSplitter::handle {
-    background: #2d2d2d;
-    width: 4px;
-}
-QSplitter#centralSplitter::handle:hover {
-    background: #007acc;
-}
-
-/* ── Editor Tabs ────────────────────────────────────────────── */
-QTabWidget#editorTabs::pane     { border: none; background: #1e1e1e; }
-QTabWidget#editorTabs > QTabBar::tab {
-    background: #2d2d2d;
-    color: #9d9d9d;
-    border: none;
-    border-right: 1px solid #252526;
-    padding: 6px 14px;
-    min-width: 80px;
-}
-QTabWidget#editorTabs > QTabBar::tab:selected {
-    background: #1e1e1e;
-    color: #ffffff;
-    border-top: 1px solid #007acc;
-}
-QTabWidget#editorTabs > QTabBar::tab:hover:!selected {
-    background: #383838;
-    color: #cccccc;
-}
-
-/* ── Bottom Dock ────────────────────────────────────────────── */
-QMainWindow::separator {
-    background: #2d2d2d;
-    width: 4px;
-    height: 4px;
-}
-QMainWindow::separator:hover {
-    background: #007acc;
-}
-QDockWidget#bottomDock  { background: #1e1e1e; color: #cccccc; }
-QTabWidget#bottomTabs::pane  { border: none; background: #1e1e1e; }
-QTabWidget#bottomTabs > QTabBar { background: #252526; }
-QTabWidget#bottomTabs > QTabBar::tab {
-    background: #252526;
-    color: #9d9d9d;
-    border: none;
-    padding: 4px 12px;
-}
-QTabWidget#bottomTabs > QTabBar::tab:selected {
-    background: #1e1e1e;
-    color: #ffffff;
-    border-top: 1px solid #007acc;
-}
-QTabWidget#bottomTabs > QTabBar::tab:hover:!selected {
-    color: #cccccc;
-    background: #2a2d2e;
-}
-QPlainTextEdit#outputPane,
-QPlainTextEdit#terminalPane {
-    background: #1e1e1e;
-    color: #d4d4d4;
-    border: none;
-    font-family: Consolas, "Courier New", monospace;
-    font-size: 11px;
-}
-
-/* ── Voice controls (Team panel) ───────────────────────────────── */
-QPushButton#voipBtn {
-    background: #3c3c3c;
-    color: #cccccc;
-    border: 1px solid #555555;
-    border-radius: 3px;
-    padding: 5px 10px;
-}
-QPushButton#voipBtn:hover   { background: #505050; }
-QPushButton#voipBtn:pressed { background: #007acc; }
-QPushButton#voipBtn:disabled { color: #555555; }
-QPushButton#voipBtn:checked { background: #007acc; }
-QWidget#callBanner {
-    background: #1e3329;
-    border-bottom: 1px solid #2d5a3d;
-}
-/* ── Shared stub label ──────────────────────────────────────── */
-QLabel#stubLabel { color: #555555; font-size: 11px; }
-QLabel#stubLabel[live="true"] { color: #4ec9b0; font-weight: 600; }
-
-/* ── Search Widget ───────────────────────────────────────── */
-
-QWidget#textSearch {
-    background: #2d2d30;
-    border: 1px solid #3c3c3c;
-    border-radius: 6px;
-}
-
-QLineEdit#searchEdit {
-    background: #3c3c3c;
-    color: #d4d4d4;
-    border: 1px solid #505050;
-    border-radius: 3px;
-    padding: 5px 8px;
-    selection-background-color: #094771;
-}
-
-QLineEdit#searchEdit:focus {
-    border: 1px solid #007acc;
-}
-
-QPushButton#searchNavBtn {
-    background: transparent;
-    color: #cccccc;
-    border: none;
-    padding: 4px 8px;
-}
-
-QPushButton#searchNavBtn:hover {
-    background: #3c3c3c;
-    border-radius: 3px;
-}
-
-QPushButton#searchNavBtn:pressed {
-    background: #454545;
-}
-
-QPushButton#searchReplaceBtn {
-    background: #0e639c;
-    color: white;
-    border: none;
-    border-radius: 3px;
-    padding: 5px 12px;
-}
-
-QPushButton#searchReplaceBtn:hover {
-    background: #1177bb;
-}
-
-QPushButton#searchReplaceBtn:pressed {
-    background: #0b4f7c;
-}
-
-QPushButton#searchReplaceBtn:disabled {
-    background: #444444;
-    color: #888888;
-}
-
-/* ── Git Panel ──────────────────────────────────────────────── */
-QWidget#gitTopBar {
-    background: #252526;
-}
-QLabel#gitSectionHeader {
-    background: #2d2d30;
-    color: #9d9d9d;
-    font-size: 10px;
-    padding-left: 4px;
-    letter-spacing: 1px;
-    border-bottom: 1px solid #3c3c3c;
-}
-QSplitter#gitSplitter::handle {
-    background: #3c3c3c;
-    width: 1px;
-}
-QTreeWidget#gitLogTree {
-    background: #252526;
-    color: #cccccc;
-    border: none;
-    outline: 0;
-    alternate-background-color: #2a2a2a;
-}
-QTreeWidget#gitLogTree::item {
-    height: 22px;
-    padding: 1px 2px;
-    border: none;
-}
-QTreeWidget#gitLogTree::item:hover    { background: #2a2d2e; }
-QTreeWidget#gitLogTree::item:selected { background: #094771; color: #ffffff; }
-QHeaderView#gitLogTree::section,
-QTreeWidget#gitLogTree QHeaderView::section {
-    background: #2d2d30;
-    color: #9d9d9d;
-    border: none;
-    border-right: 1px solid #3c3c3c;
-    border-bottom: 1px solid #3c3c3c;
-    padding: 3px 6px;
-    font-size: 11px;
-}
-
-/* ── Status Bar ─────────────────────────────────────────────── */
-QStatusBar {
-    background: #007acc;
-    color: #ffffff;
-    font-size: 11px;
-}
-QStatusBar::item { border: none; }
-QLabel#statusLabel { color: #ffffff; padding: 0 4px; }
-    )");
+    const QString style = loadStyle("dark.qss");
+    if (!style.isEmpty())
+        setStyleSheet(style);
 }
 
 void MainWindow::updateWindowTitle()
@@ -1882,9 +1577,16 @@ void MainWindow::runFile()
     if (QFileInfo(path).isRelative() && !fileBrowser->rootPath().isEmpty())
         path = QDir(fileBrowser->rootPath()).absoluteFilePath(path);
 
+    for (int i = 0; i < editorTabs->count(); ++i) {
+        if (auto *ed = qobject_cast<CodeEditor *>(editorTabs->widget(i))) {
+            const QString fp = ed->getFilePath();
+            if (!fp.isEmpty() && ed->isModified())
+                ed->saveFile(fp);
+        }
+    }
+
     const QString pythonvenv = fileBrowser->findFile("python.exe");
     const QString pythonpath = !pythonvenv.isEmpty() ? pythonvenv : "python";
-    currentEditor->saveFile(path);
     outputPane->clear();
     bottomTabs->setCurrentWidget(outputPane);
     bottomDock->setVisible(true);
@@ -1977,21 +1679,48 @@ void MainWindow::openFolder()
     const QString path = QFileDialog::getExistingDirectory(this, "Open Folder");
     if (path.isEmpty())
         return;
+    openProjectFolder(path);
+}
 
+void MainWindow::openProjectFolder(const QString &path)
+{
     fileBrowser->setRootPath(path);
     clearTabs();
 
-    editor = new CodeEditor(editorTabs);
-    editorTabs->addTab(editor, "Untitled");
-
-    currentFilePath.clear();
-    setWindowTitle(QFileInfo(path).fileName() + " — TeamHub");
+    const QString name = QFileInfo(path).fileName();
+    setWindowTitle(name + " — TeamHub");
     outputPane->appendPlainText("[TeamHub] Opened folder: " + path);
-
     terminal->setWorkingDirectory(path);
-
     if (gitPanel_)
         gitPanel_->setRepoPath(path);
+
+    currentProjectPath = path;
+    currentProjectId = ProjectDB::instance().upsertProject(path, name);
+
+    const auto files = ProjectDB::instance().loadOpenFiles(currentProjectId);
+    if (files.isEmpty()) {
+        editor = new CodeEditor(editorTabs);
+        editorTabs->addTab(editor, "Untitled");
+        currentFilePath.clear();
+        return;
+    }
+
+    int activeIdx = 0;
+    for (const auto &f : files) {
+        if (!QFileInfo::exists(f.path))
+            continue;
+        openFileFromBrowser(f.path);
+        if (f.isActive)
+            activeIdx = editorTabs->currentIndex();
+    }
+    if (editorTabs->count() == 0) {
+        editor = new CodeEditor(editorTabs);
+        editorTabs->addTab(editor, "Untitled");
+        currentFilePath.clear();
+    } else {
+        editorTabs->setCurrentIndex(activeIdx);
+        editor = qobject_cast<CodeEditor *>(editorTabs->currentWidget());
+    }
 }
 
 void MainWindow::cloneRepo()
@@ -2054,15 +1783,7 @@ void MainWindow::cloneRepo()
                     const QString repoName = url.section('/', -1).remove(".git");
                     const QString clonedPath = dest + "/" + repoName;
                     outputPane->appendPlainText("[Git] Clone successful.");
-                    fileBrowser->setRootPath(clonedPath);
-                    clearTabs();
-                    editor = new CodeEditor(editorTabs);
-                    editorTabs->addTab(editor, "Untitled");
-                    currentFilePath.clear();
-                    setWindowTitle(repoName + " — TeamHub");
-                    terminal->setWorkingDirectory(clonedPath);
-                    if (gitPanel_)
-                        gitPanel_->setRepoPath(clonedPath);
+                    openProjectFolder(clonedPath);
                 } else {
                     outputPane->appendPlainText("[Git] Clone failed (exit code "
                                                 + QString::number(code) + ").");
@@ -2459,8 +2180,8 @@ void MainWindow::updateProfileButton()
         btnProfile->setText(QString());
 
         const QPixmap fallback = Avatar::letterPixmap(Avatar::initialFor(user.username),
-                                                       Avatar::colorForId(seed),
-                                                       size);
+                                                      Avatar::colorForId(seed),
+                                                      size);
         Avatar::load(btnProfile, user.avatarUrl, fallback, size, [this](QPixmap pix) {
             btnProfile->setIcon(QIcon(pix));
         });
@@ -2496,8 +2217,8 @@ void MainWindow::openProfileDialog()
     avatarPreview->setFixedSize(avatarSize, avatarSize);
     const QString seed = user.email.isEmpty() ? QString::number(user.id) : user.email;
     const QPixmap fallback = Avatar::letterPixmap(Avatar::initialFor(user.username),
-                                                   Avatar::colorForId(seed),
-                                                   avatarSize);
+                                                  Avatar::colorForId(seed),
+                                                  avatarSize);
     Avatar::load(avatarPreview, user.avatarUrl, fallback, avatarSize, [avatarPreview](QPixmap pix) {
         avatarPreview->setPixmap(pix);
     });
@@ -2514,9 +2235,9 @@ void MainWindow::openProfileDialog()
     QString chosenAvatarPath;
     connect(btnChoosePhoto, &QPushButton::clicked, &dlg, [&]() {
         const QString path = QFileDialog::getOpenFileName(&dlg,
-                                                            "Choose Avatar",
-                                                            QString(),
-                                                            "Images (*.png *.jpg *.jpeg)");
+                                                          "Choose Avatar",
+                                                          QString(),
+                                                          "Images (*.png *.jpg *.jpeg)");
         if (path.isEmpty())
             return;
         chosenAvatarPath = path;
@@ -2557,4 +2278,74 @@ void MainWindow::updateCollabAccess()
         btnJoinCollab->setEnabled(loggedIn);
         btnJoinCollab->setToolTip(tip);
     }
+}
+
+void MainWindow::openSettings()
+{
+    auto *dlg = new SettingsDialog(this);
+    connect(dlg, &SettingsDialog::settingsApplied, this, &MainWindow::applySettings);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    dlg->exec();
+}
+
+void MainWindow::applySettings()
+{
+    auto &s = SettingsManager::instance();
+    const QFont font(s.fontFamily(), s.fontSize());
+    const int tabW = s.tabWidth();
+    const auto theme = (s.theme() == "dark") ? CodeEditor::Theme::Dark : CodeEditor::Theme::Light;
+
+    for (int i = 0; i < editorTabs->count(); ++i) {
+        if (auto *ed = qobject_cast<CodeEditor *>(editorTabs->widget(i))) {
+            ed->applyEditorFont(font);
+            ed->setTabWidth(tabW);
+            ed->setTheme(theme);
+        }
+    }
+}
+
+void MainWindow::refreshRecentMenu(QMenu *menu)
+{
+    menu->clear();
+    const auto projects = ProjectDB::instance().recentProjects(10);
+    if (projects.isEmpty()) {
+        menu->addAction("(no recent projects)")->setEnabled(false);
+        return;
+    }
+    for (const auto &p : projects) {
+        const QString label = p.name + "  \t" + p.path;
+        auto *act = menu->addAction(label);
+        connect(act, &QAction::triggered, this, [this, path = p.path] {
+            if (QFileInfo::exists(path)) {
+                openProjectFolder(path);
+            } else {
+                ProjectDB::instance().removeProject(path);
+                if (SettingsManager::instance().lastProjectPath() == path) {
+                    SettingsManager::instance().setLastProjectPath("");
+                    SettingsManager::instance().save();
+                }
+                outputPane->appendPlainText("[TeamHub] Project not found and removed from history: "
+                                            + path);
+            }
+        });
+    }
+}
+
+void MainWindow::saveSessionToDb()
+{
+    if (currentProjectId < 0)
+        return;
+
+    QList<ProjectDB::FileState> files;
+    const int current = editorTabs->currentIndex();
+    for (int i = 0; i < editorTabs->count(); ++i) {
+        auto *ed = qobject_cast<CodeEditor *>(editorTabs->widget(i));
+        if (!ed)
+            continue;
+        const QString fp = ed->getFilePath();
+        if (fp.isEmpty() || !QFileInfo(fp).isAbsolute())
+            continue;
+        files.append({fp, i, i == current});
+    }
+    ProjectDB::instance().saveOpenFiles(currentProjectId, files);
 }

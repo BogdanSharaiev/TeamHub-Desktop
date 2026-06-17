@@ -40,6 +40,7 @@ public:
     QString getFilePath() const;
 
     void setTheme(Theme theme);
+    void applyEditorFont(const QFont &font);
 
     bool isModified() const;
     int currentLine() const;

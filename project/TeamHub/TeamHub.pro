@@ -1,7 +1,9 @@
-QT += widgets core websockets multimedia network
+QT += widgets core websockets multimedia network sql
 CONFIG += c++17
 
 INCLUDEPATH += libs/include
+
+DEFINES += TEAMHUB_STYLES_DIR=\\\"$$PWD/styles/\\\"
 
 LIBS += -L$$PWD/libs -lqscintilla2_qt6d -lopus -lgit2
 
@@ -15,6 +17,16 @@ win32 {
     QMAKE_POST_LINK += $$QMAKE_COPY \
         $$shell_path($$PWD/.env) \
         $$shell_path($$OUT_PWD/) $$escape_expand(\\n\\t)
+    QMAKE_POST_LINK += xcopy /E /I /Y \
+        $$shell_path($$PWD/styles) \
+        $$shell_path($$OUT_PWD/styles) $$escape_expand(\\n\\t)
+
+    QMAKE_POST_LINK += $$QMAKE_COPY \
+        $$shell_path($$[QT_INSTALL_BINS]/Qt6Sql.dll) \
+        $$shell_path($$OUT_PWD/) $$escape_expand(\\n\\t)
+    QMAKE_POST_LINK += xcopy /E /I /Y \
+        $$shell_path($$[QT_INSTALL_PLUGINS]/sqldrivers) \
+        $$shell_path($$OUT_PWD/sqldrivers) $$escape_expand(\\n\\t)
 }
 
 SOURCES += \
@@ -24,6 +36,7 @@ SOURCES += \
     src/collab/collabsession.cpp \
     src/collab/sessionreportdialog.cpp \
     src/config/appconfig.cpp \
+    src/db/projectdb.cpp \
     src/debug/debugadapter.cpp \
     src/editor/codeeditor.cpp \
     src/editor/textsearch.cpp \
@@ -33,6 +46,8 @@ SOURCES += \
     src/main.cpp \
     src/mainwindow.cpp \
     src/rga/rgamanager.cpp \
+    src/settings/settingsmanager.cpp \
+    src/settings/settingsdialog.cpp \
     src/rga/rgaseq.cpp \
     src/team/teammanager.cpp \
     src/team/teamspanel.cpp \
@@ -47,6 +62,7 @@ HEADERS += \
     src/collab/sessionreport.h \
     src/collab/sessionreportdialog.h \
     src/config/appconfig.h \
+    src/db/projectdb.h \
     src/debug/debugadapter.h \
     src/editor/codeeditor.h \
     src/editor/textsearch.h \
@@ -56,6 +72,8 @@ HEADERS += \
     src/mainwindow.h \
     src/rga/rganode.h \
     src/rga/rgamanager.h \
+    src/settings/settingsmanager.h \
+    src/settings/settingsdialog.h \
     src/rga/rgaseq.h \
     src/team/teammanager.h \
     src/team/teamspanel.h \

@@ -182,6 +182,7 @@ void CodeEditor::setupMargins()
 
 void CodeEditor::setupEditor()
 {
+    setFrameShape(QFrame::NoFrame);
     setIndentationsUseTabs(false);
     setIndentationWidth(4);
     setTabWidth(4);
@@ -694,6 +695,16 @@ void CodeEditor::setFilePath(const QString &filepath)
 QString CodeEditor::getFilePath() const
 {
     return filePath;
+}
+
+void CodeEditor::applyEditorFont(const QFont &font)
+{
+    setFont(font);
+    setMarginsFont(font);
+    if (lexer) {
+        lexer->setFont(font);
+        setLexer(lexer);
+    }
 }
 
 void CodeEditor::setTheme(Theme t)

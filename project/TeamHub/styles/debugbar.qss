@@ -1,0 +1,22 @@
+QToolBar {
+    background: #252526;
+    border: none;
+    spacing: 3px;
+    padding: 3px 6px;
+}
+QToolButton {
+    background: #3a3d41;
+    color: #d4d4d4;
+    border: 1px solid #555558;
+    border-radius: 4px;
+    padding: 4px 11px;
+    font-size: 12px;
+}
+QToolButton:hover {
+    background: #4a4d51;
+    border-color: #569cd6;
+    color: #ffffff;
+}
+QToolButton:pressed  { background: #2a2d31; }
+QToolButton:disabled { color: #555558; background: #2d2d2d; border-color: #3a3a3a; }
+QToolBar::separator  { background: #555558; width: 1px; margin: 4px 3px; }

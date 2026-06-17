@@ -1,0 +1,318 @@
+/* ── Main window ────────────────────────────────────────────── */
+QMainWindow { background: #1e1e1e; }
+
+/* ── Menu bar ───────────────────────────────────────────────── */
+QMenuBar {
+    background: #3c3c3c;
+    color: #cccccc;
+    border-bottom: 1px solid #252526;
+}
+QMenuBar::item:selected { background: #505050; }
+QMenu {
+    background: #252526;
+    color: #cccccc;
+    border: 1px solid #454545;
+}
+QMenu::item:selected    { background: #094771; }
+QMenu::item:disabled    { color: #555555; }
+QMenu::separator {
+    height: 1px;
+    background: #454545;
+    margin: 2px 0;
+}
+
+/* ── Toolbar ────────────────────────────────────────────────── */
+QToolBar#mainToolBar {
+    background: #3c3c3c;
+    border-bottom: 1px solid #252526;
+    spacing: 2px;
+    padding: 2px 4px;
+}
+QToolBar#mainToolBar QToolButton {
+    color: #cccccc;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    padding: 3px 8px;
+}
+QToolBar#mainToolBar QToolButton:hover   { background: #505050; border-color: #606060; }
+QToolBar#mainToolBar QToolButton:pressed { background: #3a3a3a; }
+QToolBar#mainToolBar QToolButton:disabled{ color: #555555; }
+QToolBar::separator {
+    width: 1px;
+    background: #555555;
+    margin: 4px 4px;
+}
+
+/* ── Activity Bar ───────────────────────────────────────────── */
+QWidget#activityBar {
+    background: #333333;
+    border-right: 1px solid #252526;
+}
+QToolButton#activityBtn {
+    color: #858585;
+    background: transparent;
+    border: none;
+    border-left: 2px solid transparent;
+    font-size: 9px;
+}
+QToolButton#activityBtn:hover { color: #cccccc; }
+QToolButton#activityBtn:checked   { color: #ffffff; border-left-color: #007acc; }
+QToolButton#activityBtnProfile {
+    color: #858585;
+    background: transparent;
+    border: none;
+    border-left: 2px solid transparent;
+    font-size: 9px;
+}
+QToolButton#activityBtnProfile:hover { color: #cccccc; }
+QToolButton#activityBtnProfile[loggedIn="true"] { color: #4ec9b0; }
+
+/* ── Left Panel ─────────────────────────────────────────────── */
+QWidget#leftPanel {
+    background: #252526;
+    border-right: 1px solid #3c3c3c;
+}
+QLabel#panelTitle {
+    color: #bbbbbb;
+    font-size: 10px;
+    font-weight: bold;
+    background: #252526;
+    letter-spacing: 1px;
+}
+QFrame#panelSeparator {
+    color: #3c3c3c;
+    max-height: 1px;
+    background: #3c3c3c;
+}
+QTreeWidget#fileTree {
+    background: #252526;
+    color: #cccccc;
+    border: none;
+    outline: 0;
+}
+QTreeWidget#fileTree::item:hover    { background: #2a2d2e; }
+QTreeWidget#fileTree::item:selected { background: #094771; }
+QListWidget#taskList,
+QListWidget#teamList {
+    background: #252526;
+    color: #cccccc;
+    border: none;
+}
+QListWidget#taskList::item:hover,
+QListWidget#teamList::item:hover    { background: #2a2d2e; }
+QListWidget#taskList::item:selected,
+QListWidget#teamList::item:selected { background: #094771; }
+
+QTreeView#fileBrowserTree {
+    background: #252526;
+    color: #cccccc;
+    border: none;
+    outline: 0;
+}
+QTreeView#fileBrowserTree::item {
+    height: 22px;
+    padding-left: 4px;
+}
+QTreeView#fileBrowserTree::item:hover {
+    background: #2a2d2e;
+}
+QTreeView#fileBrowserTree::item:selected {
+    background: #094771;
+    color: #ffffff;
+}
+QTreeView#fileBrowserTree::branch {
+    background: #252526;
+}
+QLineEdit#fileSearch {
+    background: #3c3c3c;
+    color: #cccccc;
+    border: none;
+    border-bottom: 1px solid #454545;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+/* ── Splitter ───────────────────────────────────────────────── */
+QSplitter#centralSplitter::handle {
+    background: #2d2d2d;
+    width: 4px;
+}
+QSplitter#centralSplitter::handle:hover {
+    background: #007acc;
+}
+
+/* ── Editor Tabs ────────────────────────────────────────────── */
+QTabWidget#editorTabs::pane     { border: none; background: #1e1e1e; }
+QTabWidget#editorTabs > QTabBar::tab {
+    background: #2d2d2d;
+    color: #9d9d9d;
+    border: none;
+    border-right: 1px solid #252526;
+    padding: 6px 14px;
+    min-width: 80px;
+}
+QTabWidget#editorTabs > QTabBar::tab:selected {
+    background: #1e1e1e;
+    color: #ffffff;
+    border-top: 1px solid #007acc;
+}
+QTabWidget#editorTabs > QTabBar::tab:hover:!selected {
+    background: #383838;
+    color: #cccccc;
+}
+
+/* ── Bottom Dock ────────────────────────────────────────────── */
+QMainWindow::separator {
+    background: #2d2d2d;
+    width: 4px;
+    height: 4px;
+}
+QMainWindow::separator:hover {
+    background: #007acc;
+}
+QDockWidget#bottomDock  { background: #1e1e1e; color: #cccccc; }
+QTabWidget#bottomTabs::pane  { border: none; background: #1e1e1e; }
+QTabWidget#bottomTabs > QTabBar { background: #252526; }
+QTabWidget#bottomTabs > QTabBar::tab {
+    background: #252526;
+    color: #9d9d9d;
+    border: none;
+    padding: 4px 12px;
+}
+QTabWidget#bottomTabs > QTabBar::tab:selected {
+    background: #1e1e1e;
+    color: #ffffff;
+    border-top: 1px solid #007acc;
+}
+QTabWidget#bottomTabs > QTabBar::tab:hover:!selected {
+    color: #cccccc;
+    background: #2a2d2e;
+}
+QPlainTextEdit#outputPane,
+QPlainTextEdit#terminalPane {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    border: none;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 11px;
+}
+
+/* ── Voice controls (Team panel) ───────────────────────────────── */
+QPushButton#voipBtn {
+    background: #3c3c3c;
+    color: #cccccc;
+    border: 1px solid #555555;
+    border-radius: 3px;
+    padding: 5px 10px;
+}
+QPushButton#voipBtn:hover   { background: #505050; }
+QPushButton#voipBtn:pressed { background: #007acc; }
+QPushButton#voipBtn:disabled { color: #555555; }
+QPushButton#voipBtn:checked { background: #007acc; }
+QWidget#callBanner {
+    background: #1e3329;
+    border-bottom: 1px solid #2d5a3d;
+}
+
+/* ── Shared stub label ──────────────────────────────────────── */
+QLabel#stubLabel { color: #555555; font-size: 11px; }
+QLabel#stubLabel[live="true"] { color: #4ec9b0; font-weight: 600; }
+
+/* ── Search Widget ───────────────────────────────────────── */
+QWidget#textSearch {
+    background: #2d2d30;
+    border: 1px solid #3c3c3c;
+    border-radius: 6px;
+}
+QLineEdit#searchEdit {
+    background: #3c3c3c;
+    color: #d4d4d4;
+    border: 1px solid #505050;
+    border-radius: 3px;
+    padding: 5px 8px;
+    selection-background-color: #094771;
+}
+QLineEdit#searchEdit:focus {
+    border: 1px solid #007acc;
+}
+QPushButton#searchNavBtn {
+    background: transparent;
+    color: #cccccc;
+    border: none;
+    padding: 4px 8px;
+}
+QPushButton#searchNavBtn:hover {
+    background: #3c3c3c;
+    border-radius: 3px;
+}
+QPushButton#searchNavBtn:pressed {
+    background: #454545;
+}
+QPushButton#searchReplaceBtn {
+    background: #0e639c;
+    color: white;
+    border: none;
+    border-radius: 3px;
+    padding: 5px 12px;
+}
+QPushButton#searchReplaceBtn:hover {
+    background: #1177bb;
+}
+QPushButton#searchReplaceBtn:pressed {
+    background: #0b4f7c;
+}
+QPushButton#searchReplaceBtn:disabled {
+    background: #444444;
+    color: #888888;
+}
+
+/* ── Git Panel ──────────────────────────────────────────────── */
+QWidget#gitTopBar {
+    background: #252526;
+}
+QLabel#gitSectionHeader {
+    background: #2d2d30;
+    color: #9d9d9d;
+    font-size: 10px;
+    padding-left: 4px;
+    letter-spacing: 1px;
+    border-bottom: 1px solid #3c3c3c;
+}
+QSplitter#gitSplitter::handle {
+    background: #3c3c3c;
+    width: 1px;
+}
+QTreeWidget#gitLogTree {
+    background: #252526;
+    color: #cccccc;
+    border: none;
+    outline: 0;
+    alternate-background-color: #2a2a2a;
+}
+QTreeWidget#gitLogTree::item {
+    height: 22px;
+    padding: 1px 2px;
+    border: none;
+}
+QTreeWidget#gitLogTree::item:hover    { background: #2a2d2e; }
+QTreeWidget#gitLogTree::item:selected { background: #094771; color: #ffffff; }
+QHeaderView#gitLogTree::section,
+QTreeWidget#gitLogTree QHeaderView::section {
+    background: #2d2d30;
+    color: #9d9d9d;
+    border: none;
+    border-right: 1px solid #3c3c3c;
+    border-bottom: 1px solid #3c3c3c;
+    padding: 3px 6px;
+    font-size: 11px;
+}
+
+/* ── Status Bar ─────────────────────────────────────────────── */
+QStatusBar {
+    background: #007acc;
+    color: #ffffff;
+    font-size: 11px;
+}
+QStatusBar::item { border: none; }
+QLabel#statusLabel { color: #ffffff; padding: 0 4px; }

@@ -20,10 +20,12 @@
 #include "collab/collabsession.h"
 #include "collab/sessionreport.h"
 #include "collab/sessionreportdialog.h"
+#include "db/projectdb.h"
 #include "debug/debugadapter.h"
 #include "editor/codeeditor.h"
 #include "filebrowser/filebrowser.h"
 #include "git/gitpanel.h"
+#include "settings/settingsmanager.h"
 #include "team/teamspanel.h"
 #include "terminal/terminal.h"
 #include "voicechat/voicechat.h"
@@ -108,6 +110,10 @@ private:
     QAction *actDebugStop = nullptr;
     QAction *actDebugMain = nullptr;
 
+    // Project state
+    int currentProjectId = -1;
+    QString currentProjectPath;
+
     // Auth
     AuthManager *auth = nullptr;
     QToolButton *btnProfile = nullptr;
@@ -115,6 +121,12 @@ private:
     void updateProfileButton();
     void openProfileDialog();
     void updateCollabAccess();
+
+    void openSettings();
+    void applySettings();
+    void refreshRecentMenu(QMenu *menu);
+    void openProjectFolder(const QString &path);
+    void saveSessionToDb();
 
     // Voice
     VoiceChat *voiceChat = nullptr;

@@ -1,69 +1,10 @@
 #include "authdialog.h"
 
+#include <QCoreApplication>
+#include <QFile>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
-
-static const char *DIALOG_STYLE = R"(
-    AuthDialog, QDialog {
-        background: #1e1e1e;
-    }
-    QLineEdit {
-        background: #3c3c3c;
-        color: #cccccc;
-        border: 1px solid #555555;
-        border-radius: 3px;
-        padding: 7px 10px;
-        font-size: 13px;
-        min-height: 20px;
-        selection-background-color: #264f78;
-    }
-    QLineEdit:focus {
-        border-color: #007acc;
-        outline: none;
-    }
-    QLineEdit:disabled {
-        background: #2d2d2d;
-        color: #6a6a6a;
-    }
-    QPushButton#tabBtn {
-        background: transparent;
-        color: #969696;
-        border: none;
-        border-bottom: 2px solid transparent;
-        font-size: 13px;
-        padding: 8px 0px;
-        min-width: 140px;
-    }
-    QPushButton#tabBtn:checked {
-        color: #ffffff;
-        border-bottom: 2px solid #007acc;
-    }
-    QPushButton#tabBtn:hover:!checked {
-        color: #cccccc;
-    }
-    QPushButton#submitBtn {
-        background: #0e639c;
-        color: #ffffff;
-        border: none;
-        border-radius: 3px;
-        font-size: 13px;
-        font-weight: bold;
-        padding: 9px;
-        min-height: 22px;
-    }
-    QPushButton#submitBtn:hover {
-        background: #1177bb;
-    }
-    QPushButton#submitBtn:disabled {
-        background: #37373d;
-        color: #6a6a6a;
-    }
-    QLabel {
-        color: #cccccc;
-        background: transparent;
-    }
-)";
 
 static QWidget *makeFieldRow(const QString &labelText,
                              QLineEdit *&fieldOut,
@@ -97,7 +38,13 @@ AuthDialog::AuthDialog(AuthManager *auth, QWidget *parent)
     setFixedWidth(380);
     setModal(true);
     setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
-    setStyleSheet(DIALOG_STYLE);
+    {
+        QFile f(QCoreApplication::applicationDirPath() + "/styles/authdialog.qss");
+        if (!f.open(QIODevice::ReadOnly))
+            f.setFileName(QString(TEAMHUB_STYLES_DIR) + "authdialog.qss");
+        if (f.isOpen() || f.open(QIODevice::ReadOnly))
+            setStyleSheet(QString::fromUtf8(f.readAll()));
+    }
 
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(36, 32, 36, 32);

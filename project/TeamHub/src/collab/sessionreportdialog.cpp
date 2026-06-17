@@ -1,6 +1,7 @@
 #include "sessionreportdialog.h"
 
 #include <QApplication>
+#include <QCoreApplication>
 #include <QFile>
 #include <QFileDialog>
 #include <QFrame>
@@ -33,24 +34,13 @@ SessionReportDialog::SessionReportDialog(const SessionReportData &report,
     setMinimumSize(560, 500);
     resize(640, 620);
 
-    setStyleSheet(
-        "QDialog                { background:#1e1e1e; color:#d4d4d4; }"
-        "QWidget                { background:#1e1e1e; color:#d4d4d4; }"
-        "QLabel                 { background:transparent; color:#d4d4d4; }"
-        "QGroupBox              { border:1px solid #3c3c3c; border-radius:4px;"
-        "                         margin-top:10px; font-weight:bold;"
-        "                         color:#9cdcfe; padding:6px 8px 8px 8px; }"
-        "QGroupBox::title       { subcontrol-origin:margin; left:8px; padding:0 4px; }"
-        "QPushButton            { background:#3a3d41; color:#d4d4d4;"
-        "                         border:1px solid #555; border-radius:3px; padding:5px 14px; }"
-        "QPushButton:hover      { background:#4a4d51; }"
-        "QPushButton#primary    { background:#007acc; border-color:#007acc; color:#fff; }"
-        "QPushButton#primary:hover { background:#1a8fe0; }"
-        "QScrollArea            { border:none; }"
-        "QScrollBar:vertical    { background:#1e1e1e; width:8px; }"
-        "QScrollBar::handle:vertical { background:#3c3c3c; border-radius:4px; min-height:20px; }"
-        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }"
-        "QFrame#sep             { background:#3c3c3c; max-height:1px; }");
+    {
+        QFile f(QCoreApplication::applicationDirPath() + "/styles/reportdialog.qss");
+        if (!f.open(QIODevice::ReadOnly))
+            f.setFileName(QString(TEAMHUB_STYLES_DIR) + "reportdialog.qss");
+        if (f.isOpen() || f.open(QIODevice::ReadOnly))
+            setStyleSheet(QString::fromUtf8(f.readAll()));
+    }
 
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(14, 12, 14, 12);
