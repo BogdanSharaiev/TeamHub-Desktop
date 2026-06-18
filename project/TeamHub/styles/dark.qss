@@ -1,7 +1,5 @@
-/* ── Main window ────────────────────────────────────────────── */
 QMainWindow { background: #1e1e1e; }
 
-/* ── Menu bar ───────────────────────────────────────────────── */
 QMenuBar {
     background: #3c3c3c;
     color: #cccccc;
@@ -21,7 +19,6 @@ QMenu::separator {
     margin: 2px 0;
 }
 
-/* ── Toolbar ────────────────────────────────────────────────── */
 QToolBar#mainToolBar {
     background: #3c3c3c;
     border-bottom: 1px solid #252526;
@@ -44,7 +41,6 @@ QToolBar::separator {
     margin: 4px 4px;
 }
 
-/* ── Activity Bar ───────────────────────────────────────────── */
 QWidget#activityBar {
     background: #333333;
     border-right: 1px solid #252526;
@@ -68,7 +64,6 @@ QToolButton#activityBtnProfile {
 QToolButton#activityBtnProfile:hover { color: #cccccc; }
 QToolButton#activityBtnProfile[loggedIn="true"] { color: #4ec9b0; }
 
-/* ── Left Panel ─────────────────────────────────────────────── */
 QWidget#leftPanel {
     background: #252526;
     border-right: 1px solid #3c3c3c;
@@ -133,7 +128,6 @@ QLineEdit#fileSearch {
     font-size: 12px;
 }
 
-/* ── Splitter ───────────────────────────────────────────────── */
 QSplitter#centralSplitter::handle {
     background: #2d2d2d;
     width: 4px;
@@ -142,7 +136,6 @@ QSplitter#centralSplitter::handle:hover {
     background: #007acc;
 }
 
-/* ── Editor Tabs ────────────────────────────────────────────── */
 QTabWidget#editorTabs::pane     { border: none; background: #1e1e1e; }
 QTabWidget#editorTabs > QTabBar::tab {
     background: #2d2d2d;
@@ -161,8 +154,10 @@ QTabWidget#editorTabs > QTabBar::tab:hover:!selected {
     background: #383838;
     color: #cccccc;
 }
+QTabWidget#editorTabs > QTabBar::tab:selected:hover {
+    background: #282828;
+}
 
-/* ── Bottom Dock ────────────────────────────────────────────── */
 QMainWindow::separator {
     background: #2d2d2d;
     width: 4px;
@@ -190,7 +185,7 @@ QTabWidget#bottomTabs > QTabBar::tab:hover:!selected {
     background: #2a2d2e;
 }
 QPlainTextEdit#outputPane,
-QPlainTextEdit#terminalPane {
+QPlainTextEdit#terminalEdit {
     background: #1e1e1e;
     color: #d4d4d4;
     border: none;
@@ -198,7 +193,41 @@ QPlainTextEdit#terminalPane {
     font-size: 11px;
 }
 
-/* ── Voice controls (Team panel) ───────────────────────────────── */
+/* Terminal multi-tab */
+QTabWidget#terminalTabs::pane {
+    border: none;
+    background: #1e1e1e;
+}
+QTabWidget#terminalTabs > QTabBar {
+    background: #2d2d2d;
+}
+QTabWidget#terminalTabs > QTabBar::tab {
+    background: #2d2d2d;
+    color: #9d9d9d;
+    border: none;
+    border-right: 1px solid #252526;
+    padding: 6px 14px;
+    min-width: 80px;
+}
+QTabWidget#terminalTabs > QTabBar::tab:selected {
+    background: #1e1e1e;
+    color: #ffffff;
+    border-top: 1px solid #007acc;
+}
+QTabWidget#terminalTabs > QTabBar::tab:hover:!selected {
+    background: #383838;
+    color: #cccccc;
+}
+QTabWidget#terminalTabs > QTabBar::tab:selected:hover {
+    background: #282828;
+}
+/* "+" tab стиль — виділяємо легким відтінком */
+QTabWidget#terminalTabs > QTabBar::tab:last {
+    color: #666666;
+    min-width: 24px;
+    padding: 4px 8px;
+}
+
 QPushButton#voipBtn {
     background: #3c3c3c;
     color: #cccccc;
@@ -215,11 +244,9 @@ QWidget#callBanner {
     border-bottom: 1px solid #2d5a3d;
 }
 
-/* ── Shared stub label ──────────────────────────────────────── */
 QLabel#stubLabel { color: #555555; font-size: 11px; }
 QLabel#stubLabel[live="true"] { color: #4ec9b0; font-weight: 600; }
 
-/* ── Search Widget ───────────────────────────────────────── */
 QWidget#textSearch {
     background: #2d2d30;
     border: 1px solid #3c3c3c;
@@ -267,7 +294,6 @@ QPushButton#searchReplaceBtn:disabled {
     color: #888888;
 }
 
-/* ── Git Panel ──────────────────────────────────────────────── */
 QWidget#gitTopBar {
     background: #252526;
 }
@@ -308,7 +334,6 @@ QTreeWidget#gitLogTree QHeaderView::section {
     font-size: 11px;
 }
 
-/* ── Status Bar ─────────────────────────────────────────────── */
 QStatusBar {
     background: #007acc;
     color: #ffffff;

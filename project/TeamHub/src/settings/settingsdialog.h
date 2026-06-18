@@ -18,12 +18,12 @@ signals:
 
 private:
     QFontComboBox *fontFamilyBox;
-    QSpinBox      *fontSizeBox;
-    QSpinBox      *tabWidthBox;
-    QComboBox     *themeBox;
-    QCheckBox     *autoSaveCheck;
-    QComboBox     *inputDeviceBox;
-    QComboBox     *outputDeviceBox;
+    QSpinBox *fontSizeBox;
+    QSpinBox *tabWidthBox;
+    QComboBox *themeBox;
+    QCheckBox *autoSaveCheck;
+    QComboBox *inputDeviceBox;
+    QComboBox *outputDeviceBox;
 
     void loadValues();
     void applyValues();

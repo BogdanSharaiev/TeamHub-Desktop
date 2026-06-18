@@ -83,8 +83,8 @@ int ProjectDB::upsertProject(const QString &path, const QString &name)
     if (existing >= 0) {
         q.prepare("UPDATE projects SET name = :name, last_opened = :ts WHERE id = :id");
         q.bindValue(":name", name);
-        q.bindValue(":ts",   now);
-        q.bindValue(":id",   existing);
+        q.bindValue(":ts", now);
+        q.bindValue(":id", existing);
         if (!q.exec())
             qWarning() << "[ProjectDB] UPDATE failed:" << q.lastError().text();
         return existing;
@@ -93,7 +93,7 @@ int ProjectDB::upsertProject(const QString &path, const QString &name)
     q.prepare("INSERT INTO projects (path, name, last_opened) VALUES (:path, :name, :ts)");
     q.bindValue(":path", path);
     q.bindValue(":name", name);
-    q.bindValue(":ts",   now);
+    q.bindValue(":ts", now);
     if (!q.exec()) {
         qWarning() << "[ProjectDB] INSERT failed:" << q.lastError().text();
         return -1;
@@ -128,9 +128,9 @@ void ProjectDB::saveOpenFiles(int projectId, const QList<FileState> &files)
         VALUES (:pid, :path, :ord, :active)
     )");
     for (const FileState &f : files) {
-        q.bindValue(":pid",    projectId);
-        q.bindValue(":path",   f.path);
-        q.bindValue(":ord",    f.tabOrder);
+        q.bindValue(":pid", projectId);
+        q.bindValue(":path", f.path);
+        q.bindValue(":ord", f.tabOrder);
         q.bindValue(":active", f.isActive ? 1 : 0);
         if (!q.exec())
             qWarning() << "[ProjectDB] insert open_file:" << q.lastError().text();
@@ -155,11 +155,7 @@ QList<ProjectDB::FileState> ProjectDB::loadOpenFiles(int projectId)
         return result;
 
     while (q.next()) {
-        result.append({
-            q.value(0).toString(),
-            q.value(1).toInt(),
-            q.value(2).toInt() != 0
-        });
+        result.append({q.value(0).toString(), q.value(1).toInt(), q.value(2).toInt() != 0});
     }
     return result;
 }
@@ -182,12 +178,10 @@ QList<ProjectDB::ProjectInfo> ProjectDB::recentProjects(int limit)
         return result;
 
     while (q.next()) {
-        result.append({
-            q.value(0).toInt(),
-            q.value(1).toString(),
-            q.value(2).toString(),
-            q.value(3).toLongLong()
-        });
+        result.append({q.value(0).toInt(),
+                       q.value(1).toString(),
+                       q.value(2).toString(),
+                       q.value(3).toLongLong()});
     }
     return result;
 }

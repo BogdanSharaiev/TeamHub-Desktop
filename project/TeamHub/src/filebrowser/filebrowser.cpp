@@ -1,11 +1,46 @@
 #include "filebrowser.h"
 #include <QApplication>
+#include <QCoreApplication>
 #include <QDir>
 #include <QDirIterator>
 #include <QHeaderView>
+#include <QImage>
+#include <QPixmap>
 #include <QStyle>
 #include <QVBoxLayout>
 #include <functional>
+
+static QIcon loadIconTransparent(const QString &path)
+{
+    QImage img(path);
+    if (img.isNull())
+        return QIcon();
+    img = img.convertToFormat(QImage::Format_ARGB32);
+    for (int y = 0; y < img.height(); ++y) {
+        for (int x = 0; x < img.width(); ++x) {
+            const QColor c(img.pixel(x, y));
+            if (c.red() > 230 && c.green() > 230 && c.blue() > 230)
+                img.setPixel(x, y, qRgba(0, 0, 0, 0));
+        }
+    }
+    return QIcon(QPixmap::fromImage(img));
+}
+
+class TeamHubIconProvider : public QFileIconProvider
+{
+    QIcon pyIcon;
+
+public:
+    explicit TeamHubIconProvider(const QIcon &icon)
+        : pyIcon(icon)
+    {}
+    QIcon icon(const QFileInfo &info) const override
+    {
+        if (!pyIcon.isNull() && info.suffix().toLower() == "py")
+            return pyIcon;
+        return QFileIconProvider::icon(info);
+    }
+};
 
 FileBrowser::FileBrowser(QWidget *parent)
     : QWidget(parent)
@@ -28,8 +63,15 @@ void FileBrowser::setupFileBrowser()
     stack = new QStackedWidget(this);
     layout->addWidget(stack);
 
+    QString iconPath = QCoreApplication::applicationDirPath() + "/icons/python.png";
+    pythonIcon = loadIconTransparent(iconPath);
+    if (pythonIcon.isNull())
+        pythonIcon = loadIconTransparent(QString(TEAMHUB_ICONS_DIR) + "python.png");
+
     model = new QFileSystemModel(this);
     model->setRootPath(QDir::homePath());
+    if (!pythonIcon.isNull())
+        model->setIconProvider(new TeamHubIconProvider(pythonIcon));
 
     tree = new QTreeView(this);
     tree->setModel(model);
@@ -100,7 +142,7 @@ void FileBrowser::setRemoteFiles(const QStringList &relPaths)
     remoteTree->clear();
 
     const QIcon folderIcon = QApplication::style()->standardIcon(QStyle::SP_DirIcon);
-    const QIcon fileIcon = QApplication::style()->standardIcon(QStyle::SP_FileIcon);
+    const QIcon defaultFileIcon = QApplication::style()->standardIcon(QStyle::SP_FileIcon);
 
     QMap<QString, QTreeWidgetItem *> dirItems;
 
@@ -132,7 +174,8 @@ void FileBrowser::setRemoteFiles(const QStringList &relPaths)
         QTreeWidgetItem *parent = getOrCreateDir(dirPart);
         QTreeWidgetItem *fileItem = parent ? new QTreeWidgetItem(parent, QStringList(fileName))
                                            : new QTreeWidgetItem(remoteTree, QStringList(fileName));
-        fileItem->setIcon(0, fileIcon);
+        const bool isPython = fileName.endsWith(".py", Qt::CaseInsensitive);
+        fileItem->setIcon(0, isPython && !pythonIcon.isNull() ? pythonIcon : defaultFileIcon);
         fileItem->setData(0, Qt::UserRole, relPath);
     }
 

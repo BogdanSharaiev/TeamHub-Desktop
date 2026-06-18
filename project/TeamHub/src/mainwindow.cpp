@@ -21,12 +21,15 @@
 #include <QFrame>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QImage>
 #include <QInputDialog>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QPixmap>
 #include <QProcess>
 #include <QRadioButton>
 #include <QRandomGenerator>
@@ -38,6 +41,26 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <functional>
+
+static QIcon loadIconTransparent(const QString &name, bool removeDark = false)
+{
+    QString path = QCoreApplication::applicationDirPath() + "/icons/" + name;
+    QImage img(path);
+    if (img.isNull())
+        img = QImage(QString(TEAMHUB_ICONS_DIR) + name);
+    if (img.isNull())
+        return QIcon();
+    img = img.convertToFormat(QImage::Format_ARGB32);
+    for (int y = 0; y < img.height(); ++y)
+        for (int x = 0; x < img.width(); ++x) {
+            const QColor c(img.pixel(x, y));
+            const bool isLight = c.red() > 230 && c.green() > 230 && c.blue() > 230;
+            const bool isDark = removeDark && c.red() < 25 && c.green() < 25 && c.blue() < 25;
+            if (isLight || isDark)
+                img.setPixel(x, y, qRgba(0, 0, 0, 0));
+        }
+    return QIcon(QPixmap::fromImage(img));
+}
 
 static QString loadStyle(const QString &name)
 {
@@ -78,6 +101,10 @@ MainWindow::MainWindow(QWidget *parent)
     setSidePanelPage(0);
     btnFiles->setChecked(true);
     connect(editorTabs, &QTabWidget::currentChanged, this, &MainWindow::onTabChanged);
+    connect(editorTabs, &QTabWidget::currentChanged, this, [this] { updateRunCombo(); });
+    connect(editorTabs, &QTabWidget::tabCloseRequested, this, [this] {
+        QTimer::singleShot(0, this, &MainWindow::updateRunCombo);
+    });
     connect(editor, &CodeEditor::cursorPositionUpdated, this, &MainWindow::onCursorPositionUpdated);
     connect(editor, &CodeEditor::modifyChanged, this, &MainWindow::onModificationChanged);
 
@@ -100,6 +127,52 @@ MainWindow::MainWindow(QWidget *parent)
 }
 
 MainWindow::~MainWindow() = default;
+
+bool MainWindow::eventFilter(QObject *obj, QEvent *event)
+{
+    if (obj == outputPane && event->type() == QEvent::KeyPress) {
+        auto *ke = static_cast<QKeyEvent *>(event);
+        const bool processRunning = runProcess && runProcess->state() == QProcess::Running;
+
+        if (!processRunning)
+            return QMainWindow::eventFilter(obj, event);
+
+        const int key = ke->key();
+
+        if (key == Qt::Key_Return || key == Qt::Key_Enter) {
+            QTextCursor end(outputPane->document());
+            end.movePosition(QTextCursor::End);
+            end.setPosition(inputStartPos, QTextCursor::KeepAnchor);
+            QTextCursor sel(outputPane->document());
+            sel.setPosition(inputStartPos);
+            sel.movePosition(QTextCursor::End, QTextCursor::KeepAnchor);
+            QString inputText = sel.selectedText();
+            inputText.replace(QChar(0x2029), '\n');
+            inputText = inputText.trimmed();
+            runProcess->write((inputText + "\n").toLocal8Bit());
+            QTextCursor c = outputPane->textCursor();
+            c.movePosition(QTextCursor::End);
+            c.insertText("\n");
+            inputStartPos = c.position();
+            return true;
+        }
+
+        if (key == Qt::Key_Backspace) {
+            QTextCursor c = outputPane->textCursor();
+            if (!c.hasSelection() && c.position() <= inputStartPos)
+                return true;
+        }
+
+        if (!ke->text().isEmpty()) {
+            QTextCursor c = outputPane->textCursor();
+            if (c.position() < inputStartPos) {
+                c.movePosition(QTextCursor::End);
+                outputPane->setTextCursor(c);
+            }
+        }
+    }
+    return QMainWindow::eventFilter(obj, event);
+}
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
@@ -131,9 +204,7 @@ CodeEditor *MainWindow::createTab(const QString &name)
 {
     CodeEditor *ed = new CodeEditor(editorTabs);
     connect(ed, &CodeEditor::cursorPositionUpdated, this, &MainWindow::onCursorPositionUpdated);
-
     connect(ed, &CodeEditor::modifyChanged, this, &MainWindow::onModificationChanged);
-
     editorTabs->addTab(ed, name);
     return ed;
 }
@@ -289,36 +360,66 @@ void MainWindow::setupMainToolBar()
     auto *tb = addToolBar("Main");
     tb->setObjectName("mainToolBar");
     tb->setMovable(false);
+    tb->setIconSize(QSize(16, 16));
 
-    tb->addAction("New", this, &MainWindow::newFile);
-    tb->addAction("Open", this, &MainWindow::openFile);
-    tb->addAction("Save", this, [this] { saveFile(); });
+    auto *actOpen = tb->addAction("Open Folder", this, &MainWindow::openFolder);
+    actOpen->setIcon(loadIconTransparent("openfolder.png", true));
+    actOpen->setToolTip("Open Folder");
+
+    auto *actSave = tb->addAction("Save", this, [this] { saveFile(); });
+    actSave->setIcon(loadIconTransparent("save.png", true));
+    actSave->setToolTip("Save (Ctrl+S)");
+
     tb->addSeparator();
+
+    auto *actUndo = tb->addAction("Undo", this, [this] {
+        if (auto *ed = qobject_cast<CodeEditor *>(editorTabs->currentWidget()))
+            ed->undo();
+    });
+    actUndo->setIcon(loadIconTransparent("undo.png"));
+    actUndo->setToolTip("Undo (Ctrl+Z)");
+    actUndo->setShortcut(QKeySequence::Undo);
+
+    auto *actRedo = tb->addAction("Redo", this, [this] {
+        if (auto *ed = qobject_cast<CodeEditor *>(editorTabs->currentWidget()))
+            ed->redo();
+    });
+    actRedo->setIcon(loadIconTransparent("redo.png"));
+    actRedo->setToolTip("Redo (Ctrl+Y)");
+    actRedo->setShortcut(QKeySequence::Redo);
+
+    tb->addSeparator();
+
+    runFileCombo = new QComboBox(this);
+    runFileCombo->setFixedWidth(160);
+    runFileCombo->setToolTip("Select file to run");
+    tb->addWidget(runFileCombo);
 
     auto *actRun = tb->addAction("Run", this, &MainWindow::runFile);
     actRun->setToolTip("Run (F5)");
     actRun->setShortcut(QKeySequence("F5"));
+    const QIcon runIcon = loadIconTransparent("runcode.png");
+    if (!runIcon.isNull())
+        actRun->setIcon(runIcon);
 
     actDebugMain = tb->addAction("Debug", this, &MainWindow::startDebugging);
-    actDebugMain->setToolTip("Start/Stop Debugging (F9)");
+    actDebugMain->setToolTip("Start Debugging (F9)");
     actDebugMain->setShortcut(QKeySequence("F9"));
+    const QIcon debugIcon = loadIconTransparent("debug.png");
+    if (!debugIcon.isNull())
+        actDebugMain->setIcon(debugIcon);
 
-    tb->addSeparator();
-
-    auto *actCollab = tb->addAction("Collab");
-    actCollab->setCheckable(true);
-    connect(actCollab, &QAction::triggered, this, [this, actCollab](bool checked) {
-        if (checked) {
-            if (!showStartCollabDialog())
-                actCollab->setChecked(false);
-        } else {
-            stopAllCollab();
+    actStop = tb->addAction(QString(QChar(0x25A0)), this, &MainWindow::stopRun);
+    actStop->setToolTip("Stop (Shift+F5)");
+    actStop->setShortcut(QKeySequence("Shift+F5"));
+    actStop->setEnabled(false);
+    QTimer::singleShot(0, this, [this, tb] {
+        if (auto *btn = qobject_cast<QToolButton *>(tb->widgetForAction(actStop))) {
+            btn->setToolButtonStyle(Qt::ToolButtonTextOnly);
+            btn->setStyleSheet("QToolButton { color:#f44747; font-size:14px; font-weight:bold; }"
+                               "QToolButton:disabled { color:#5a2020; }");
         }
     });
-
-    auto *actCall = tb->addAction("Call");
-    actCall->setToolTip("Open Team voice rooms");
-    connect(actCall, &QAction::triggered, this, [this] { onActivityButton(2); });
 }
 
 void MainWindow::startCollab(const QString &room,
@@ -1057,6 +1158,7 @@ void MainWindow::openFileFromBrowser(const QString &path)
     const QString name = QFileInfo(path).fileName();
     const int tabIdx = editorTabs->addTab(newEditor, name);
     editorTabs->setCurrentIndex(tabIdx);
+    updateRunCombo();
 
     if (session) {
         const QString relPath = toSessionKey(path);
@@ -1101,7 +1203,26 @@ void MainWindow::setupBottomDock()
     bottomDock->setObjectName("bottomDock");
     bottomDock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable);
     bottomDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea);
-    bottomDock->setTitleBarWidget(new QWidget);
+    auto *dockTitleBar = new QWidget;
+    auto *dockTitleLayout = new QHBoxLayout(dockTitleBar);
+    dockTitleLayout->setContentsMargins(0, 0, 4, 0);
+    dockTitleLayout->setSpacing(0);
+    dockTitleLayout->addStretch();
+    auto *dockCloseBtn = new QToolButton(dockTitleBar);
+    dockCloseBtn->setText(QString(QChar(0x00D7)));
+    dockCloseBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    dockCloseBtn->setToolTip("Close Panel");
+    dockCloseBtn->setStyleSheet(
+        "QToolButton { color: rgba(255,255,255,0.5); font-size:16px; border:none;"
+        "              background:transparent; padding:0 4px; }"
+        "QToolButton:hover { color: white; }");
+    connect(dockCloseBtn, &QToolButton::clicked, this, [this] {
+        if (terminal)
+            terminal->killAll();
+        bottomDock->hide();
+    });
+    dockTitleLayout->addWidget(dockCloseBtn);
+    bottomDock->setTitleBarWidget(dockTitleBar);
 
     bottomTabs = new QTabWidget;
     bottomTabs->setObjectName("bottomTabs");
@@ -1111,12 +1232,29 @@ void MainWindow::setupBottomDock()
     outputPane->setObjectName("outputPane");
     outputPane->setReadOnly(true);
     outputPane->setPlaceholderText("Build and run output will appear here...");
+    outputPane->installEventFilter(this);
     bottomTabs->addTab(outputPane, "Output");
 
     terminal = new Terminal(this);
-    terminal->setWorkingDirectory(fileBrowser->rootPath());
     terminal->setObjectName("terminal");
+    terminal->setWorkingDirectory(fileBrowser->rootPath());
     bottomTabs->addTab(terminal, "Terminal");
+
+    connect(bottomTabs, &QTabWidget::currentChanged, this, [this](int idx) {
+        if (bottomTabs->widget(idx) == terminal && terminal->terminalCount() == 0)
+            terminal->addTerminal();
+    });
+
+    auto *actTerminal = new QAction(this);
+    actTerminal->setShortcut(QKeySequence(Qt::ALT | Qt::Key_F12));
+    addAction(actTerminal);
+    connect(actTerminal, &QAction::triggered, this, [this] {
+        if (terminal->terminalCount() == 0)
+            terminal->addTerminal();
+        bottomTabs->setCurrentWidget(terminal);
+        bottomDock->setVisible(true);
+        terminal->focusCurrent();
+    });
 
     gitPanel_ = new GitPanel(this);
     gitPane = gitPanel_;
@@ -1180,7 +1318,9 @@ void MainWindow::setupDebugPanel()
 
     dbgBar->addSeparator();
 
-    actDebugStop = dbgBar->addAction(u8"■  Stop", this, &MainWindow::stopDebugging);
+    actDebugStop = dbgBar->addAction(QString(QChar(0x25A0)) + "  Stop",
+                                     this,
+                                     &MainWindow::stopDebugging);
     actDebugStop->setShortcut(QKeySequence("Shift+F9"));
     actDebugStop->setToolTip("Stop Debugging (Shift+F9)");
 
@@ -1274,7 +1414,8 @@ void MainWindow::startDebugging()
 
     outputPane->appendPlainText(QString("[Debug] Starting: %1").arg(path));
     outputPane->appendPlainText("[Debug] Install debugpy if missing:  pip install debugpy");
-    bottomTabs->setCurrentWidget(outputPane);
+    bottomTabs->setCurrentWidget(debugPane);
+    bottomDock->setVisible(true);
 
     debugAdapter->startDebugging(path, ed->breakpoints());
 }
@@ -1555,6 +1696,40 @@ void MainWindow::onModificationChanged(bool modified)
         editorTabs->setTabText(idx, name + dirty);
 }
 
+void MainWindow::updateRunCombo()
+{
+    if (!runFileCombo)
+        return;
+    const QString current = runFileCombo->currentText();
+    runFileCombo->blockSignals(true);
+    runFileCombo->clear();
+    runFileCombo->addItem("Current File", QString());
+    for (int i = 0; i < editorTabs->count(); ++i) {
+        if (auto *ed = qobject_cast<CodeEditor *>(editorTabs->widget(i))) {
+            const QString fp = ed->getFilePath();
+            if (!fp.isEmpty())
+                runFileCombo->addItem(QFileInfo(fp).fileName(), fp);
+        }
+    }
+    const int idx = runFileCombo->findText(current);
+    if (idx >= 0)
+        runFileCombo->setCurrentIndex(idx);
+    runFileCombo->blockSignals(false);
+}
+
+void MainWindow::stopRun()
+{
+    if (runProcess && runProcess->state() != QProcess::NotRunning) {
+        runProcess->kill();
+        runProcess = nullptr;
+    }
+    if (debugAdapter && debugAdapter->isRunning())
+        stopDebugging();
+    if (actStop)
+        actStop->setEnabled(false);
+    outputPane->setReadOnly(true);
+}
+
 void MainWindow::runFile()
 {
     if (session && session->role() == CollabSession::Role::Guest) {
@@ -1564,11 +1739,13 @@ void MainWindow::runFile()
         return;
     }
 
-    CodeEditor *currentEditor = qobject_cast<CodeEditor *>(editorTabs->currentWidget());
-    if (!currentEditor)
-        return;
-
-    QString path = currentEditor->getFilePath();
+    QString path;
+    if (runFileCombo && runFileCombo->currentIndex() >= 0)
+        path = runFileCombo->currentData().toString();
+    if (path.isEmpty()) {
+        if (auto *ed = qobject_cast<CodeEditor *>(editorTabs->currentWidget()))
+            path = ed->getFilePath();
+    }
     if (path.isEmpty()) {
         outputPane->appendPlainText("[TeamHub] Save file before running.");
         return;
@@ -1585,34 +1762,69 @@ void MainWindow::runFile()
         }
     }
 
+    if (runProcess && runProcess->state() != QProcess::NotRunning)
+        runProcess->kill();
+
     const QString pythonvenv = fileBrowser->findFile("python.exe");
     const QString pythonpath = !pythonvenv.isEmpty() ? pythonvenv : "python";
     outputPane->clear();
+    outputPane->setReadOnly(false);
+    inputStartPos = 0;
     bottomTabs->setCurrentWidget(outputPane);
     bottomDock->setVisible(true);
 
-    QProcess *proc = new QProcess(this);
-    proc->setProcessChannelMode(QProcess::MergedChannels);
+    runProcess = new QProcess(this);
+    runProcess->setProcessChannelMode(QProcess::MergedChannels);
 
-    connect(proc, &QProcess::readyReadStandardOutput, this, [this, proc]() {
-        const QString chunk = QString::fromLocal8Bit(proc->readAllStandardOutput());
-        outputPane->appendPlainText(chunk);
+    connect(runProcess, &QProcess::readyReadStandardOutput, this, [this]() {
+        const QString chunk = QString::fromLocal8Bit(runProcess->readAllStandardOutput());
+
+        QTextCursor userSel(outputPane->document());
+        userSel.setPosition(inputStartPos);
+        userSel.movePosition(QTextCursor::End, QTextCursor::KeepAnchor);
+        const QString userTyped = userSel.selectedText().replace(QChar(0x2029), '\n');
+        if (!userTyped.isEmpty())
+            userSel.removeSelectedText();
+
+        QTextCursor c(outputPane->document());
+        c.movePosition(QTextCursor::End);
+        c.insertText(chunk);
+        QTextCursor endC(outputPane->document());
+        endC.movePosition(QTextCursor::End);
+        inputStartPos = endC.position();
+
+        if (!userTyped.isEmpty()) {
+            QTextCursor restore(outputPane->document());
+            restore.movePosition(QTextCursor::End);
+            restore.insertText(userTyped);
+        }
+
+        QTextCursor fin(outputPane->document());
+        fin.movePosition(QTextCursor::End);
+        outputPane->setTextCursor(fin);
+        outputPane->ensureCursorVisible();
+
         if (session)
             session->broadcastRunOutput(chunk);
     });
 
-    connect(proc,
+    connect(runProcess,
             QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this,
-            [this, proc](int code, QProcess::ExitStatus) {
+            [this](int code, QProcess::ExitStatus) {
                 const QString msg = QString("\n[TeamHub] Exit code: %1").arg(code);
                 outputPane->appendPlainText(msg);
                 if (session)
                     session->broadcastRunOutput(msg);
-                proc->deleteLater();
+                runProcess = nullptr;
+                outputPane->setReadOnly(true);
+                if (actStop)
+                    actStop->setEnabled(false);
             });
 
-    proc->start(pythonpath, {path});
+    runProcess->start(pythonpath, {path});
+    if (actStop)
+        actStop->setEnabled(true);
 }
 
 void MainWindow::newFile()

@@ -29,7 +29,6 @@ SettingsDialog::SettingsDialog(QWidget *parent)
 
     auto *tabs = new QTabWidget(this);
 
-    // ── Editor tab ─────────────────────────────────────────────
     auto *editorPage = new QWidget;
     auto *editorForm = new QFormLayout(editorPage);
     editorForm->setSpacing(12);
@@ -51,7 +50,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     editorForm->addRow("Tab width:", tabWidthBox);
 
     themeBox = new QComboBox;
-    themeBox->addItem("Dark",  "dark");
+    themeBox->addItem("Dark", "dark");
     themeBox->addItem("Light", "light");
     editorForm->addRow("Theme:", themeBox);
 
@@ -60,26 +59,24 @@ SettingsDialog::SettingsDialog(QWidget *parent)
 
     tabs->addTab(editorPage, "Editor");
 
-    // ── Audio tab ──────────────────────────────────────────────
     auto *audioPage = new QWidget;
     auto *audioForm = new QFormLayout(audioPage);
     audioForm->setSpacing(12);
     audioForm->setContentsMargins(16, 16, 16, 16);
     audioForm->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
 
-    inputDeviceBox  = new QComboBox;
+    inputDeviceBox = new QComboBox;
     outputDeviceBox = new QComboBox;
     populateAudioDevices();
     audioForm->addRow("Microphone:", inputDeviceBox);
-    audioForm->addRow("Speakers:",   outputDeviceBox);
+    audioForm->addRow("Speakers:", outputDeviceBox);
 
     tabs->addTab(audioPage, "Audio");
 
     root->addWidget(tabs);
 
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok
-                                         | QDialogButtonBox::Apply
-                                         | QDialogButtonBox::Cancel,
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Apply
+                                             | QDialogButtonBox::Cancel,
                                          this);
     root->addWidget(buttons);
     root->setContentsMargins(0, 0, 8, 8);
@@ -127,7 +124,7 @@ void SettingsDialog::loadValues()
             }
         }
     };
-    selectById(inputDeviceBox,  s.audioInputDevice());
+    selectById(inputDeviceBox, s.audioInputDevice());
     selectById(outputDeviceBox, s.audioOutputDevice());
 }
 

@@ -4,15 +4,16 @@
 #include <QPlainTextEdit>
 #include <QProcess>
 #include <QStringList>
+#include <QTabWidget>
 #include <QWidget>
 
 class TerminalEdit : public QPlainTextEdit
 {
     Q_OBJECT
 public:
-    explicit TerminalEdit(QWidget *parent = nullptr);
+    explicit TerminalEdit(const QString &workingDir, QWidget *parent = nullptr);
     ~TerminalEdit() override;
-    void setWorkingDirectory(const QString& path);
+    void killProcess();
 
 protected:
     void keyPressEvent(QKeyEvent *e) override;
@@ -25,11 +26,11 @@ private slots:
     void onProcessFinished(int exitCode, QProcess::ExitStatus status);
 
 private:
-    QProcess   *process;
-    int         promptPos;
-    QString     currentDir;
+    QProcess *process;
+    int promptPos;
+    QString currentDir;
     QStringList history;
-    int         historyIdx;
+    int historyIdx;
 
     void startShell();
     void appendOutput(const QString &text);
@@ -48,10 +49,16 @@ class Terminal : public QWidget
     Q_OBJECT
 public:
     explicit Terminal(QWidget *parent = nullptr);
-    void setWorkingDirectory(const QString& path);
+    void setWorkingDirectory(const QString &path);
+    void addTerminal();
+    int terminalCount() const;
+    void focusCurrent();
+    void killAll();
 
 private:
-    TerminalEdit *edit;
+    QTabWidget *tabs;
+    QString workingDir;
+    int counter = 0;
 };
 
 #endif // TERMINAL_H

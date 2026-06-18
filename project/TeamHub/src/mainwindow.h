@@ -2,12 +2,14 @@
 #define MAINWINDOW_H
 
 #include <QAction>
+#include <QComboBox>
 #include <QDockWidget>
 #include <QLabel>
 #include <QListWidget>
 #include <QMainWindow>
 #include <QMap>
 #include <QPlainTextEdit>
+#include <QProcess>
 #include <QPushButton>
 #include <QRandomGenerator>
 #include <QSplitter>
@@ -40,6 +42,7 @@ public:
 
 protected:
     void closeEvent(QCloseEvent *event) override;
+    bool eventFilter(QObject *obj, QEvent *event) override;
 
 private:
     //Activity Bar
@@ -64,7 +67,6 @@ private:
     QDockWidget *bottomDock;
     QTabWidget *bottomTabs;
     QPlainTextEdit *outputPane;
-    QPlainTextEdit *terminalPane;
     Terminal *terminal;
     QWidget *gitPane;
     GitPanel *gitPanel_ = nullptr;
@@ -98,6 +100,12 @@ private:
     // Session report
     SessionReportDialog *reportDialog = nullptr;
     bool pendingEndCollab = false;
+
+    // Run
+    QProcess *runProcess = nullptr;
+    QComboBox *runFileCombo = nullptr;
+    QAction *actStop = nullptr;
+    int inputStartPos = 0;
 
     // Debug
     DebugAdapter *debugAdapter = nullptr;
@@ -176,8 +184,10 @@ private slots:
     void openFolder();
     void cloneRepo();
     void runFile();
+    void stopRun();
     void startDebugging();
     void stopDebugging();
+    void updateRunCombo();
     bool saveFile();
     bool saveFileAs();
 

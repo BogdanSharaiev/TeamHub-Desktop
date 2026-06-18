@@ -4,6 +4,7 @@ CONFIG += c++17
 INCLUDEPATH += libs/include
 
 DEFINES += TEAMHUB_STYLES_DIR=\\\"$$PWD/styles/\\\"
+DEFINES += TEAMHUB_ICONS_DIR=\\\"$$PWD/icons/\\\"
 
 LIBS += -L$$PWD/libs -lqscintilla2_qt6d -lopus -lgit2
 
@@ -20,6 +21,9 @@ win32 {
     QMAKE_POST_LINK += xcopy /E /I /Y \
         $$shell_path($$PWD/styles) \
         $$shell_path($$OUT_PWD/styles) $$escape_expand(\\n\\t)
+    QMAKE_POST_LINK += xcopy /E /I /Y \
+        $$shell_path($$PWD/icons) \
+        $$shell_path($$OUT_PWD/icons) $$escape_expand(\\n\\t)
 
     QMAKE_POST_LINK += $$QMAKE_COPY \
         $$shell_path($$[QT_INSTALL_BINS]/Qt6Sql.dll) \

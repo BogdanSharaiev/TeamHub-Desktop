@@ -1,6 +1,8 @@
 #ifndef FILEBROWSER_H
 #define FILEBROWSER_H
+#include <QFileIconProvider>
 #include <QFileSystemModel>
+#include <QIcon>
 #include <QInputDialog>
 #include <QLineEdit>
 #include <QMenu>
@@ -52,6 +54,7 @@ private:
 
     QString clipboardPath;
     bool isCut = false;
+    QIcon pythonIcon;
 };
 
 #endif // FILEBROWSER_H
