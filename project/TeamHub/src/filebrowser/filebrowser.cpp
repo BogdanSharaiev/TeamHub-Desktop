@@ -60,7 +60,40 @@ void FileBrowser::setupFileBrowser()
     searchBox->setObjectName("fileSearch");
     layout->addWidget(searchBox);
 
+    placeholder = new QWidget(this);
+    auto *phLayout = new QVBoxLayout(placeholder);
+    phLayout->setAlignment(Qt::AlignCenter);
+    phLayout->setSpacing(10);
+
+    const QString btnStyle = "QPushButton {"
+                             "  background: #0e639c;"
+                             "  color: #ffffff;"
+                             "  border: none;"
+                             "  border-radius: 6px;"
+                             "  padding: 8px 18px;"
+                             "  font-size: 12px;"
+                             "}"
+                             "QPushButton:hover { background: #1177bb; }"
+                             "QPushButton:pressed { background: #0a4f7e; }";
+
+    auto *btnOpen = new QPushButton("Open Folder", placeholder);
+    btnOpen->setFixedWidth(160);
+    btnOpen->setCursor(Qt::PointingHandCursor);
+    btnOpen->setStyleSheet(btnStyle);
+    connect(btnOpen, &QPushButton::clicked, this, &FileBrowser::openFolderRequested);
+
+    auto *btnClone = new QPushButton("Clone Repository", placeholder);
+    btnClone->setFixedWidth(160);
+    btnClone->setCursor(Qt::PointingHandCursor);
+    btnClone->setStyleSheet(btnStyle);
+    connect(btnClone, &QPushButton::clicked, this, &FileBrowser::cloneRepoRequested);
+
+    phLayout->addWidget(btnOpen);
+    phLayout->addWidget(btnClone);
+    layout->addWidget(placeholder);
+
     stack = new QStackedWidget(this);
+    stack->setVisible(false);
     layout->addWidget(stack);
 
     QString iconPath = QCoreApplication::applicationDirPath() + "/icons/python.png";
@@ -75,7 +108,7 @@ void FileBrowser::setupFileBrowser()
 
     tree = new QTreeView(this);
     tree->setModel(model);
-    tree->setRootIndex(model->index(QDir::homePath()));
+    tree->setRootIndex(QModelIndex());
     tree->setHeaderHidden(true);
     tree->hideColumn(1);
     tree->hideColumn(2);
@@ -119,13 +152,17 @@ void FileBrowser::setupFilter()
 
 void FileBrowser::setRootPath(const QString &path)
 {
+    m_projectLoaded = true;
     model->setRootPath(path);
     tree->setRootIndex(model->index(path));
+    placeholder->setVisible(false);
+    stack->setVisible(true);
+    stack->setCurrentIndex(0);
 }
 
 QString FileBrowser::rootPath() const
 {
-    return model->rootPath();
+    return m_projectLoaded ? model->rootPath() : QString();
 }
 
 QString FileBrowser::findFile(const QString &filename)

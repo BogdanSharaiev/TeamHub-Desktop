@@ -105,9 +105,6 @@ MainWindow::MainWindow(QWidget *parent)
     connect(editorTabs, &QTabWidget::tabCloseRequested, this, [this] {
         QTimer::singleShot(0, this, &MainWindow::updateRunCombo);
     });
-    connect(editor, &CodeEditor::cursorPositionUpdated, this, &MainWindow::onCursorPositionUpdated);
-    connect(editor, &CodeEditor::modifyChanged, this, &MainWindow::onModificationChanged);
-
     outputPane->appendPlainText("[TeamHub] Ready.");
     updateWindowTitle();
     setupAuthManager();
@@ -176,7 +173,7 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event)
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
-    if (editor->isModified()) {
+    if (editor && editor->isModified()) {
         const auto btn
             = QMessageBox::question(this,
                                     "Unsaved Changes",
@@ -234,14 +231,30 @@ void MainWindow::setupMenuBar()
     fileMenu->addAction("E&xit", QKeySequence::Quit, qApp, &QApplication::quit);
 
     QMenu *editMenu = menuBar()->addMenu("&Edit");
-    editMenu->addAction("&Undo", QKeySequence::Undo, this, [this] { editor->undo(); });
-    editMenu->addAction("&Redo", QKeySequence::Redo, this, [this] { editor->redo(); });
+    editMenu->addAction("&Undo", QKeySequence::Undo, this, [this] {
+        if (editor)
+            editor->undo();
+    });
+    editMenu->addAction("&Redo", QKeySequence::Redo, this, [this] {
+        if (editor)
+            editor->redo();
+    });
     editMenu->addSeparator();
-    editMenu->addAction("Cu&t", QKeySequence::Cut, this, [this] { editor->cut(); });
-    editMenu->addAction("&Copy", QKeySequence::Copy, this, [this] { editor->copy(); });
-    editMenu->addAction("&Paste", QKeySequence::Paste, this, [this] { editor->paste(); });
+    editMenu->addAction("Cu&t", QKeySequence::Cut, this, [this] {
+        if (editor)
+            editor->cut();
+    });
+    editMenu->addAction("&Copy", QKeySequence::Copy, this, [this] {
+        if (editor)
+            editor->copy();
+    });
+    editMenu->addAction("&Paste", QKeySequence::Paste, this, [this] {
+        if (editor)
+            editor->paste();
+    });
     editMenu->addAction("Select &All", QKeySequence::SelectAll, this, [this] {
-        editor->selectAll();
+        if (editor)
+            editor->selectAll();
     });
     editMenu->addSeparator();
     auto *actFind = editMenu->addAction("&Find / Replace...", QKeySequence("Ctrl+F"));
@@ -264,15 +277,28 @@ void MainWindow::setupMenuBar()
                         &MainWindow::toggleBottomDock);
     viewMenu->addAction("Toggle &Team Panel", {}, this, [this] { onActivityButton(2); });
     viewMenu->addSeparator();
-    viewMenu->addAction("Zoom &In", QKeySequence::ZoomIn, this, [this] { editor->zoomIn(); });
-    viewMenu->addAction("Zoom &Out", QKeySequence::ZoomOut, this, [this] { editor->zoomOut(); });
+    viewMenu->addAction("Zoom &In", QKeySequence::ZoomIn, this, [this] {
+        if (editor)
+            editor->zoomIn();
+    });
+    viewMenu->addAction("Zoom &Out", QKeySequence::ZoomOut, this, [this] {
+        if (editor)
+            editor->zoomOut();
+    });
     viewMenu->addAction("Reset &Zoom", QKeySequence("Ctrl+0"), this, [this] {
-        editor->resetZoom();
+        if (editor)
+            editor->resetZoom();
     });
     viewMenu->addSeparator();
     QMenu *themeMenu = viewMenu->addMenu("&Theme");
-    themeMenu->addAction("Dark", this, [this] { editor->setTheme(CodeEditor::Theme::Dark); });
-    themeMenu->addAction("Light", this, [this] { editor->setTheme(CodeEditor::Theme::Light); });
+    themeMenu->addAction("Dark", this, [this] {
+        if (editor)
+            editor->setTheme(CodeEditor::Theme::Dark);
+    });
+    themeMenu->addAction("Light", this, [this] {
+        if (editor)
+            editor->setTheme(CodeEditor::Theme::Light);
+    });
 
     QMenu *gitMenu = menuBar()->addMenu("&Git");
 
@@ -862,9 +888,6 @@ void MainWindow::onRemoteFileFocusChanged(int siteId, const QString &file)
 
 void MainWindow::onTabCloseRequested(int tabIndex)
 {
-    if (editorTabs->count() <= 1)
-        return;
-
     CodeEditor *tabEditor = qobject_cast<CodeEditor *>(editorTabs->widget(tabIndex));
     if (!tabEditor)
         return;
@@ -894,6 +917,7 @@ void MainWindow::onTabCloseRequested(int tabIndex)
     }
 
     editorTabs->removeTab(tabIndex);
+    tabEditor->deleteLater();
 }
 
 void MainWindow::setSidePanelPage(int index)
@@ -1116,6 +1140,8 @@ void MainWindow::setupLeftPanel()
     leftStack->addWidget(teamsPanel);
 
     connect(fileBrowser, &FileBrowser::fileDoubleClicked, this, &MainWindow::openFileFromBrowser);
+    connect(fileBrowser, &FileBrowser::openFolderRequested, this, &MainWindow::openFolder);
+    connect(fileBrowser, &FileBrowser::cloneRepoRequested, this, &MainWindow::cloneRepo);
 }
 
 void MainWindow::openFileFromBrowser(const QString &path)
@@ -1190,9 +1216,7 @@ void MainWindow::setupEditorArea()
     editorTabs->setTabsClosable(true);
     editorTabs->setMovable(true);
     editorTabs->setDocumentMode(true);
-
-    editor = new CodeEditor(editorTabs);
-    editorTabs->addTab(editor, "Untitled");
+    editor = nullptr;
 
     connect(editorTabs, &QTabWidget::tabCloseRequested, this, &MainWindow::onTabCloseRequested);
 }
@@ -1624,8 +1648,13 @@ void MainWindow::setupStatusBar()
 void MainWindow::onTabChanged(int index)
 {
     CodeEditor *activeEditor = qobject_cast<CodeEditor *>(editorTabs->widget(index));
-    if (!activeEditor)
+    if (!activeEditor) {
+        editor = nullptr;
+        currentFilePath.clear();
+        statusFile->setText("");
+        updateWindowTitle();
         return;
+    }
     editor = activeEditor;
     QString path = activeEditor->getFilePath();
     currentFilePath = path;
@@ -1669,7 +1698,7 @@ void MainWindow::updateWindowTitle()
 {
     const QString name = currentFilePath.isEmpty() ? "Untitled"
                                                    : QFileInfo(currentFilePath).fileName();
-    const QString dirty = editor->isModified() ? " \u25cf" : "";
+    const QString dirty = (editor && editor->isModified()) ? " \u25cf" : "";
     setWindowTitle(name + dirty + " \u2014 TeamHub");
 }
 
@@ -1829,7 +1858,16 @@ void MainWindow::runFile()
 
 void MainWindow::newFile()
 {
-    if (editor->isModified()) {
+    if (editorTabs->count() == 0) {
+        editor = createTab("Untitled");
+        editorTabs->setCurrentIndex(0);
+        currentFilePath.clear();
+        statusFile->setText("Untitled");
+        updateWindowTitle();
+        return;
+    }
+
+    if (editor && editor->isModified()) {
         const auto btn = QMessageBox::question(this,
                                                "Unsaved Changes",
                                                "Save changes before creating a new file?",
@@ -1857,6 +1895,7 @@ void MainWindow::clearTabs()
         editorTabs->removeTab(0);
         delete w;
     }
+    editor = nullptr;
 }
 
 void MainWindow::openFile()
@@ -1910,12 +1949,8 @@ void MainWindow::openProjectFolder(const QString &path)
     currentProjectId = ProjectDB::instance().upsertProject(path, name);
 
     const auto files = ProjectDB::instance().loadOpenFiles(currentProjectId);
-    if (files.isEmpty()) {
-        editor = new CodeEditor(editorTabs);
-        editorTabs->addTab(editor, "Untitled");
-        currentFilePath.clear();
+    if (files.isEmpty())
         return;
-    }
 
     int activeIdx = 0;
     for (const auto &f : files) {
@@ -1925,11 +1960,7 @@ void MainWindow::openProjectFolder(const QString &path)
         if (f.isActive)
             activeIdx = editorTabs->currentIndex();
     }
-    if (editorTabs->count() == 0) {
-        editor = new CodeEditor(editorTabs);
-        editorTabs->addTab(editor, "Untitled");
-        currentFilePath.clear();
-    } else {
+    if (editorTabs->count() > 0) {
         editorTabs->setCurrentIndex(activeIdx);
         editor = qobject_cast<CodeEditor *>(editorTabs->currentWidget());
     }

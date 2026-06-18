@@ -7,6 +7,7 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
+#include <QPushButton>
 #include <QStackedWidget>
 #include <QTreeView>
 #include <QTreeWidget>
@@ -29,6 +30,8 @@ public:
 
 signals:
     void fileDoubleClicked(const QString &filePath);
+    void openFolderRequested();
+    void cloneRepoRequested();
 
 private slots:
     void onItemDoubleClicked(const QModelIndex &index);
@@ -46,6 +49,7 @@ private:
     void setupFileBrowser();
     void setupFilter();
 
+    QWidget *placeholder;
     QStackedWidget *stack;
     QTreeView *tree;
     QFileSystemModel *model;
@@ -54,6 +58,7 @@ private:
 
     QString clipboardPath;
     bool isCut = false;
+    bool m_projectLoaded = false;
     QIcon pythonIcon;
 };
 
